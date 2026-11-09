@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "ask": ["mcp__vercel", "Bash(git push:*)", "Bash(npx supabase db push:*)"],
+    "deny": ["Bash(git push --force:*)", "Read(./**/.env*)", "Read(./android/local.properties)"]
+  }
+}

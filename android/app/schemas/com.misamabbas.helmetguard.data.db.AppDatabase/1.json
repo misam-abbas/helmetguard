@@ -1,0 +1,561 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "0d08eb5f28fcf7bcea6711cf2bca048f",
+    "entities": [
+      {
+        "tableName": "sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `source` TEXT NOT NULL, `startedAt` INTEGER NOT NULL, `endedAt` INTEGER, `status` TEXT NOT NULL, `locationLabel` TEXT, `videoUri` TEXT, `videoFileName` TEXT, `videoDurationMs` INTEGER, `sampleFps` INTEGER, `lastProcessedMs` INTEGER NOT NULL, `framesProcessed` INTEGER NOT NULL, `avgFps` REAL, `motorcyclesTotal` INTEGER NOT NULL, `ridersTotal` INTEGER NOT NULL, `ridersHelmet` INTEGER NOT NULL, `ridersNoHelmet` INTEGER NOT NULL, `ridersUnknown` INTEGER NOT NULL, `violationsConfirmed` INTEGER NOT NULL, `settingsJson` TEXT NOT NULL, `modelVersion` TEXT NOT NULL, `dirty` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAt",
+            "columnName": "endedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "locationLabel",
+            "columnName": "locationLabel",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "videoUri",
+            "columnName": "videoUri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "videoFileName",
+            "columnName": "videoFileName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "videoDurationMs",
+            "columnName": "videoDurationMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sampleFps",
+            "columnName": "sampleFps",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastProcessedMs",
+            "columnName": "lastProcessedMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "framesProcessed",
+            "columnName": "framesProcessed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avgFps",
+            "columnName": "avgFps",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "motorcyclesTotal",
+            "columnName": "motorcyclesTotal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ridersTotal",
+            "columnName": "ridersTotal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ridersHelmet",
+            "columnName": "ridersHelmet",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ridersNoHelmet",
+            "columnName": "ridersNoHelmet",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ridersUnknown",
+            "columnName": "ridersUnknown",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "violationsConfirmed",
+            "columnName": "violationsConfirmed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "settingsJson",
+            "columnName": "settingsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "modelVersion",
+            "columnName": "modelVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dirty",
+            "columnName": "dirty",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sessions_startedAt",
+            "unique": false,
+            "columnNames": [
+              "startedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sessions_startedAt` ON `${TABLE_NAME}` (`startedAt`)"
+          },
+          {
+            "name": "index_sessions_source",
+            "unique": false,
+            "columnNames": [
+              "source"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sessions_source` ON `${TABLE_NAME}` (`source`)"
+          }
+        ]
+      },
+      {
+        "tableName": "violations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sessionId` TEXT NOT NULL, `trackId` INTEGER NOT NULL, `source` TEXT NOT NULL, `detectedAt` INTEGER NOT NULL, `videoTimestampMs` INTEGER, `riderCount` INTEGER NOT NULL, `noHelmetCount` INTEGER NOT NULL, `ridersJson` TEXT NOT NULL, `helmetPolicy` TEXT NOT NULL, `helmetConfidence` REAL, `motorcycleConfidence` REAL, `framesObserved` INTEGER NOT NULL, `noHelmetFrames` INTEGER NOT NULL, `plateTextOcr` TEXT, `plateOcrConfidence` REAL, `plateOcrStatus` TEXT NOT NULL, `plateCandidatesJson` TEXT NOT NULL, `ocrEngine` TEXT, `modelVersion` TEXT NOT NULL, `appVersion` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `syncState` TEXT NOT NULL, `syncError` TEXT, `serverSyncedAt` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`sessionId`) REFERENCES `sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trackId",
+            "columnName": "trackId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detectedAt",
+            "columnName": "detectedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "videoTimestampMs",
+            "columnName": "videoTimestampMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "riderCount",
+            "columnName": "riderCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "noHelmetCount",
+            "columnName": "noHelmetCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ridersJson",
+            "columnName": "ridersJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "helmetPolicy",
+            "columnName": "helmetPolicy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "helmetConfidence",
+            "columnName": "helmetConfidence",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "motorcycleConfidence",
+            "columnName": "motorcycleConfidence",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "framesObserved",
+            "columnName": "framesObserved",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "noHelmetFrames",
+            "columnName": "noHelmetFrames",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "plateTextOcr",
+            "columnName": "plateTextOcr",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "plateOcrConfidence",
+            "columnName": "plateOcrConfidence",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "plateOcrStatus",
+            "columnName": "plateOcrStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "plateCandidatesJson",
+            "columnName": "plateCandidatesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ocrEngine",
+            "columnName": "ocrEngine",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "modelVersion",
+            "columnName": "modelVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "appVersion",
+            "columnName": "appVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "syncState",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncError",
+            "columnName": "syncError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverSyncedAt",
+            "columnName": "serverSyncedAt",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_violations_sessionId",
+            "unique": false,
+            "columnNames": [
+              "sessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_violations_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
+          },
+          {
+            "name": "index_violations_detectedAt",
+            "unique": false,
+            "columnNames": [
+              "detectedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_violations_detectedAt` ON `${TABLE_NAME}` (`detectedAt`)"
+          },
+          {
+            "name": "index_violations_syncState",
+            "unique": false,
+            "columnNames": [
+              "syncState"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_violations_syncState` ON `${TABLE_NAME}` (`syncState`)"
+          },
+          {
+            "name": "index_violations_source",
+            "unique": false,
+            "columnNames": [
+              "source"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_violations_source` ON `${TABLE_NAME}` (`source`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "sessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "evidence_files",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `violationId` TEXT NOT NULL, `kind` TEXT NOT NULL, `seq` INTEGER NOT NULL, `relativePath` TEXT NOT NULL, `width` INTEGER NOT NULL, `height` INTEGER NOT NULL, `bytes` INTEGER NOT NULL, `sha256` TEXT NOT NULL, `bboxJson` TEXT, `frameTimestampMs` INTEGER, `qualityScore` REAL, `isEnhanced` INTEGER NOT NULL, `uploadable` INTEGER NOT NULL, `uploaded` INTEGER NOT NULL, `removedLocally` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`violationId`) REFERENCES `violations`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "violationId",
+            "columnName": "violationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seq",
+            "columnName": "seq",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relativePath",
+            "columnName": "relativePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bytes",
+            "columnName": "bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sha256",
+            "columnName": "sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bboxJson",
+            "columnName": "bboxJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "frameTimestampMs",
+            "columnName": "frameTimestampMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "qualityScore",
+            "columnName": "qualityScore",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "isEnhanced",
+            "columnName": "isEnhanced",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadable",
+            "columnName": "uploadable",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploaded",
+            "columnName": "uploaded",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "removedLocally",
+            "columnName": "removedLocally",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_evidence_files_violationId",
+            "unique": false,
+            "columnNames": [
+              "violationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_evidence_files_violationId` ON `${TABLE_NAME}` (`violationId`)"
+          },
+          {
+            "name": "index_evidence_files_violationId_kind_seq",
+            "unique": true,
+            "columnNames": [
+              "violationId",
+              "kind",
+              "seq"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_evidence_files_violationId_kind_seq` ON `${TABLE_NAME}` (`violationId`, `kind`, `seq`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "violations",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "violationId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "sync_log",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `timestamp` INTEGER NOT NULL, `violationId` TEXT, `message` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "violationId",
+            "columnName": "violationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "message",
+            "columnName": "message",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_log_timestamp",
+            "unique": false,
+            "columnNames": [
+              "timestamp"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_log_timestamp` ON `${TABLE_NAME}` (`timestamp`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '0d08eb5f28fcf7bcea6711cf2bca048f')"
+    ]
+  }
+}
