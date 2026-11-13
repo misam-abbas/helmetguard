@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.misamabbas.helmetguard.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.postgrest.from
@@ -34,6 +35,14 @@ sealed interface AuthState {
     data object Disabled : AuthState
     data object MustGoOnline : AuthState
     data class Ready(val role: String, val developerMode: Boolean = false) : AuthState
+}
+
+sealed interface SignUpResult {
+    /** Supabase has email confirmation off, so the account is signed in straight away. */
+    data class SignedIn(val state: AuthState) : SignUpResult
+
+    /** A code was emailed and must be entered before the account goes to an admin. */
+    data object CodeSent : SignUpResult
 }
 
 @Singleton
@@ -97,16 +106,41 @@ class AuthRepository @Inject constructor(
         resolveState()
     }
 
-    suspend fun signUp(name: String, email: String, password: String): Result<AuthState> = runCatching {
-        requireNotNull(client).auth.signUpWith(Email) {
+    /**
+     * With email confirmation on in Supabase, no session comes back: a 6-digit code is
+     * emailed, and the account only exists for an admin to approve once that code is entered.
+     */
+    suspend fun signUp(name: String, email: String, password: String): Result<SignUpResult> = runCatching {
+        // If the email carries a link as well as the code, the link opens the website.
+        requireNotNull(client).auth.signUpWith(Email, redirectUrl = WEB_EMAIL_LINK) {
             this.email = email.trim()
             this.password = password
             data = buildJsonObject { put("full_name", name.trim()) }
         }
-        if (client.auth.currentSessionOrNull() == null) client.auth.signInWith(Email) {
-            this.email = email.trim()
-            this.password = password
-        }
+        if (client.auth.currentSessionOrNull() == null) SignUpResult.CodeSent else SignUpResult.SignedIn(resolveState())
+    }
+
+    suspend fun verifySignUpCode(email: String, code: String): Result<AuthState> = runCatching {
+        requireNotNull(client).auth.verifyEmailOtp(type = OtpType.Email.EMAIL, email = email.trim(), token = code.trim())
+        resolveState()
+    }
+
+    suspend fun resendSignUpCode(email: String): Result<Unit> = runCatching {
+        requireNotNull(client).auth.resendEmail(type = OtpType.Email.SIGNUP, email = email.trim())
+    }
+
+    /**
+     * Emails a reset code, and a link that opens the website's reset page.
+     * Says nothing about whether the address has an account.
+     */
+    suspend fun sendPasswordReset(email: String): Result<Unit> = runCatching {
+        requireNotNull(client).auth.resetPasswordForEmail(email = email.trim(), redirectUrl = WEB_EMAIL_LINK)
+    }
+
+    suspend fun resetPassword(email: String, code: String, newPassword: String): Result<AuthState> = runCatching {
+        val supabase = requireNotNull(client)
+        supabase.auth.verifyEmailOtp(type = OtpType.Email.RECOVERY, email = email.trim(), token = code.trim())
+        supabase.auth.updateUser { password = newPassword }
         resolveState()
     }
 
@@ -118,5 +152,7 @@ class AuthRepository @Inject constructor(
     private companion object {
         const val DEFAULT_GRACE_DAYS = 7L
         const val DAY_MS = 86_400_000L
+        // The website page that finishes a sign-up confirmation or password reset from an email link.
+        const val WEB_EMAIL_LINK = "https://helmetguard.vercel.app/auth/callback"
     }
 }

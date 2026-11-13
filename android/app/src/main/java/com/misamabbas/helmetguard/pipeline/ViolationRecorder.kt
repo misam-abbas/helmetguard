@@ -10,14 +10,8 @@ import com.misamabbas.helmetguard.data.db.EvidenceFileEntity
 import com.misamabbas.helmetguard.data.db.SessionEntity
 import com.misamabbas.helmetguard.data.db.SyncState
 import com.misamabbas.helmetguard.data.db.ViolationEntity
-import com.misamabbas.helmetguard.ocr.MlKitPlateOcr
-import com.misamabbas.helmetguard.ocr.PlateEnhancer
 import com.misamabbas.helmetguard.sync.SyncScheduler
 import com.misamabbas.helmetguard.vision.geometry.Box
-import com.misamabbas.helmetguard.vision.plate.PlateAlternative
-import com.misamabbas.helmetguard.vision.plate.PlateReading
-import com.misamabbas.helmetguard.vision.plate.PlateStatus
-import com.misamabbas.helmetguard.vision.plate.PlateVoting
 import com.misamabbas.helmetguard.vision.verify.BikeMotion
 import com.misamabbas.helmetguard.vision.verify.Candidate
 import com.misamabbas.helmetguard.vision.verify.Deduplicator
@@ -61,13 +55,10 @@ data class SessionContext(
 class ViolationRecorder @Inject constructor(
     private val db: AppDatabase,
     private val store: EvidenceStore,
-    private val ocr: MlKitPlateOcr,
-    private val enhancer: PlateEnhancer,
     private val sync: SyncScheduler,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val queue = Channel<suspend () -> Unit>(Channel.UNLIMITED)
-    private val voting = PlateVoting()
 
     init {
         scope.launch {
@@ -75,17 +66,29 @@ class ViolationRecorder @Inject constructor(
         }
     }
 
-    fun listenerFor(session: SessionContext, wallClockOf: (Long) -> Long): ViolationListener = object : ViolationListener {
+    fun listenerFor(
+        session: SessionContext,
+        onStillWanted: (TrackRecord) -> Unit = {},
+        wallClockOf: (Long) -> Long,
+    ): ViolationListener = object : ViolationListener {
         private val dedup = Deduplicator()
+
+        // Touched only by jobs on the single queue, so these need no locking.
+        private var mergedCount = 0
+        private var lastTotals: SessionTotals? = null
+
+        private fun adjusted(totals: SessionTotals) = totals.copy(violations = max(0, totals.violations - mergedCount))
+
+        override fun onStillWanted(record: TrackRecord) = onStillWanted.invoke(record)
 
         override fun onConfirmed(record: TrackRecord, timestampMs: Long) {
             val track = record.lastTrack ?: return
-            val duplicate = dedup.findDuplicate(Candidate(timestampMs, track.box, null, record.histogram))
+            val duplicate = dedup.findDuplicate(Candidate(timestampMs, track.box, record.histogram))
             if (duplicate != null) return
 
             val id = UUID.randomUUID().toString()
             record.violationId = id
-            dedup.remember(RecentEvent(id, timestampMs, track.box, track.velocityX, track.velocityY, null, record.histogram))
+            dedup.remember(RecentEvent(id, timestampMs, track.box, track.velocityX, track.velocityY, record.histogram))
 
             val entity = ViolationEntity(
                 id = id,
@@ -108,14 +111,23 @@ class ViolationRecorder @Inject constructor(
             val track = record.lastTrack ?: return
             val verdicts = record.votes.verdicts(BikeMotion(track.velocityX, track.growthRate))
             val frames = record.frames.best().toList()
-            val plates = record.plates.best().toList()
             val confidence = record.motorcycleConfidence
             val observed = record.framesObserved
-            queue.trySend { finalise(id, session, record.trackId, verdicts, frames, plates, confidence, observed) }
+            val still = record.still
+            queue.trySend {
+                val merged = finalise(id, session, record.trackId, verdicts, frames, still, confidence, observed)
+                if (merged) {
+                    mergedCount++
+                    lastTotals?.let { saveTotals(session.sessionId, adjusted(it)) }
+                }
+            }
         }
 
         override fun onTotals(totals: SessionTotals) {
-            queue.trySend { saveTotals(session.sessionId, totals) }
+            queue.trySend {
+                lastTotals = totals
+                saveTotals(session.sessionId, adjusted(totals))
+            }
         }
     }
 
@@ -142,17 +154,18 @@ class ViolationRecorder @Inject constructor(
         )
     }
 
+    /** Returns true when this event turned out to be a repeat and was merged away. */
     private suspend fun finalise(
         id: String,
         session: SessionContext,
         trackId: Int,
         verdicts: List<RiderVerdict>,
         frames: List<EvidenceFrame>,
-        plates: List<PlateCrop>,
+        still: StillPhoto?,
         motorcycleConfidence: Float,
         framesObserved: Int,
-    ) {
-        val existing = db.violations().byId(id) ?: return
+    ): Boolean {
+        val existing = db.violations().byId(id) ?: return false
         val best = frames.firstOrNull()
         val quality = session.jpegQuality
 
@@ -214,17 +227,15 @@ class ViolationRecorder @Inject constructor(
             }
         }
 
-        val ocrResult = readPlate(plates)
-        plates.firstOrNull()?.let { plate ->
-            add("plate", 0, plate.jpeg, plate.width, plate.height, plate.timestampMs)
-            ocrResult.enhanced?.let { enhanced -> add("plate_enhanced", 0, enhanced.first, enhanced.second, enhanced.third, plate.timestampMs, enhanced = true) }
-        }
+        // Number plates are not detected or read. The evidence is the whole frame, the
+        // whole motorcycle with its riders, and the bare-headed riders themselves.
+        still?.let { add("still_hires", 0, it.jpeg, it.width, it.height, null, upload = false) }
 
         val noHelmet = verdicts.count { it.status == RiderStatus.NO_HELMET }
         val noHelmetFrames = verdicts.maxOfOrNull { it.noHelmetFrames } ?: 0
         val helmetConfidence = verdicts.filter { it.status == RiderStatus.NO_HELMET }.maxOfOrNull { it.confidence }
 
-        files["meta.json"] = meta(id, session, verdicts, motorcycleConfidence, framesObserved, best?.timestampMs, ocrResult.alternatives).toByteArray()
+        files["meta.json"] = meta(id, session, verdicts, motorcycleConfidence, framesObserved, best?.timestampMs).toByteArray()
 
         val written = store.writeAtomically(id, files).associateBy { it.name }
         val rows = described.map { row ->
@@ -239,43 +250,12 @@ class ViolationRecorder @Inject constructor(
             motorcycleConfidence = motorcycleConfidence,
             framesObserved = framesObserved,
             noHelmetFrames = noHelmetFrames,
-            plateTextOcr = ocrResult.text.takeIf { it.isNotEmpty() },
-            plateOcrConfidence = ocrResult.confidence.takeIf { ocrResult.status != PlateStatus.NO_PLATE_DETECTED },
-            plateOcrStatus = ocrResult.status.name.lowercase(),
-            plateCandidatesJson = alternativesJson(ocrResult.alternatives).toString(),
-            ocrEngine = ocr.name.takeIf { ocrResult.status != PlateStatus.NO_PLATE_DETECTED },
             trackId = trackId,
             syncState = SyncState.QUEUED,
         )
         db.violations().finalise(updated, rows)
         sync.syncSoon()
-    }
-
-    private data class OcrOutcome(
-        val text: String,
-        val confidence: Float,
-        val status: PlateStatus,
-        val alternatives: List<PlateAlternative>,
-        val enhanced: Triple<ByteArray, Int, Int>?,
-    )
-
-    private suspend fun readPlate(plates: List<PlateCrop>): OcrOutcome {
-        val readings = ArrayList<PlateReading>()
-        var firstEnhanced: Triple<ByteArray, Int, Int>? = null
-        for (plate in plates) {
-            val crop = BitmapFactory.decodeByteArray(plate.jpeg, 0, plate.jpeg.size) ?: continue
-            runCatching {
-                val enhanced = enhancer.enhance(crop)
-                if (firstEnhanced == null) {
-                    firstEnhanced = Triple(compress(enhanced, ENHANCED_QUALITY), enhanced.width, enhanced.height)
-                }
-                ocr.read(enhanced)?.let { readings += it }
-                enhanced.recycle()
-            }
-            crop.recycle()
-        }
-        val vote = voting.vote(readings, plates.size)
-        return OcrOutcome(vote.text, vote.confidence, vote.status, vote.alternatives, firstEnhanced)
+        return false
     }
 
     private fun cropJpeg(source: Bitmap, box: Box, quality: Int): Triple<ByteArray, Int, Int>? {
@@ -321,10 +301,6 @@ class ViolationRecorder @Inject constructor(
         if (box != null) put("box", normalised(box, width, height))
     }
 
-    private fun alternativesJson(list: List<PlateAlternative>) = buildJsonArray {
-        list.forEach { add(buildJsonObject { put("text", it.text); put("confidence", it.confidence) }) }
-    }
-
     private fun meta(
         id: String,
         session: SessionContext,
@@ -332,7 +308,6 @@ class ViolationRecorder @Inject constructor(
         motorcycleConfidence: Float,
         framesObserved: Int,
         frameTimestampMs: Long?,
-        alternatives: List<PlateAlternative>,
     ): String = buildJsonObject {
         put("violation_id", id)
         put("session_id", session.sessionId)
@@ -353,12 +328,10 @@ class ViolationRecorder @Inject constructor(
                 })
             }
         })
-        put("plate_candidates", alternativesJson(alternatives))
     }.toString()
 
     private companion object {
         const val THUMB_WIDTH = 320
         const val THUMB_QUALITY = 70
-        const val ENHANCED_QUALITY = 90
     }
 }

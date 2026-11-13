@@ -40,7 +40,6 @@ import com.misamabbas.helmetguard.data.db.ViolationListRow
 import com.misamabbas.helmetguard.sync.SyncScheduler
 import com.misamabbas.helmetguard.ui.components.EmptyMessage
 import com.misamabbas.helmetguard.ui.components.LocalImage
-import com.misamabbas.helmetguard.ui.components.PlateText
 import com.misamabbas.helmetguard.ui.components.SourceSwitch
 import com.misamabbas.helmetguard.ui.components.SourceTag
 import com.misamabbas.helmetguard.ui.components.SyncBadge
@@ -66,9 +65,8 @@ class ViolationsViewModel @Inject constructor(
     val store: EvidenceStore,
 ) : ViewModel() {
     val source = settings.sourceFilter.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SourceFilter.ALL)
-    val query = MutableStateFlow("")
-    val rows = combine(source, query) { s, q -> s to q.uppercase().filter(Char::isLetterOrDigit) }
-        .flatMapLatest { (s, q) -> db.violations().observeList(s.dbValue, null, q) }
+    val rows = source
+        .flatMapLatest { s -> db.violations().observeList(s.dbValue, null, "") }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun select(value: SourceFilter) {
@@ -79,13 +77,11 @@ class ViolationsViewModel @Inject constructor(
 @Composable
 fun ViolationsScreen(onOpen: (String) -> Unit, viewModel: ViolationsViewModel = hiltViewModel()) {
     val source by viewModel.source.collectAsStateWithLifecycle()
-    val query by viewModel.query.collectAsStateWithLifecycle()
     val rows by viewModel.rows.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Violations", style = MaterialTheme.typography.headlineSmall)
         SourceSwitch(source, viewModel::select)
-        OutlinedTextField(query, { viewModel.query.value = it }, label = { Text("Search plate") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         if (rows.isEmpty()) {
             EmptyMessage("No violations yet", "AI alerts appear here after a session finds one.")
         } else {
@@ -103,7 +99,7 @@ fun ViolationCard(row: ViolationListRow, store: EvidenceStore, onOpen: (String) 
             LocalImage(row.thumbPath?.let(store::file), "Violation thumbnail", Modifier.width(84.dp).height(63.dp), maxSize = 320)
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PlateText(row.plateTextOcr, row.plateOcrStatus)
+                    Text("Rider without helmet", style = MaterialTheme.typography.titleSmall)
                     SourceTag(row.source)
                 }
                 Text(
@@ -127,7 +123,21 @@ class ViolationDetailViewModel @Inject constructor(
     private val db: AppDatabase,
     val store: EvidenceStore,
     private val sync: SyncScheduler,
+    private val settings: SettingsRepository,
+    private val lock: EvidenceLockState,
 ) : ViewModel() {
+    /** Null until the setting is read, so evidence never flashes before the lock. */
+    val locked = MutableStateFlow<Boolean?>(null)
+
+    init {
+        viewModelScope.launch { locked.value = settings.current().evidenceLock && !lock.isUnlocked }
+    }
+
+    fun unlock() {
+        lock.markUnlocked()
+        locked.value = false
+    }
+
     private val id = MutableStateFlow<String?>(null)
     val violation = id.flatMapLatest { it?.let(db.violations()::observe) ?: flowOf(null) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -149,12 +159,17 @@ class ViolationDetailViewModel @Inject constructor(
 @Composable
 fun ViolationDetailScreen(id: String, viewModel: ViolationDetailViewModel = hiltViewModel()) {
     LaunchedEffect(id) { viewModel.load(id) }
+    val locked by viewModel.locked.collectAsStateWithLifecycle()
     val violation by viewModel.violation.collectAsStateWithLifecycle()
     val evidence by viewModel.evidence.collectAsStateWithLifecycle()
+    if (locked != false) {
+        if (locked == true) EvidenceLockGate(viewModel::unlock)
+        return
+    }
     val current = violation ?: return
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PlateText(current.plateTextOcr, current.plateOcrStatus)
+        Text("Rider without helmet", style = MaterialTheme.typography.headlineSmall)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             UnverifiedBadge()
             SyncBadge(current.syncState)
@@ -170,11 +185,19 @@ fun ViolationDetailScreen(id: String, viewModel: ViolationDetailViewModel = hilt
 
 @Composable
 private fun EvidenceGallery(files: List<EvidenceFileEntity>, store: EvidenceStore) {
-    val order = listOf("full_frame", "motorcycle", "rider", "head", "plate", "plate_enhanced", "alt_frame")
-    order.flatMap { kind -> files.filter { it.kind == kind && !it.removedLocally } }.forEach { file ->
+    // The picture of the whole bike comes first. Number plates are not captured.
+    val labels = linkedMapOf(
+        "motorcycle" to "Whole bike",
+        "full_frame" to "Full frame",
+        "still_hires" to "Camera photo",
+        "rider" to "Rider without helmet",
+        "head" to "Head",
+        "alt_frame" to "Another frame",
+    )
+    labels.keys.flatMap { kind -> files.filter { it.kind == kind && !it.removedLocally } }.forEach { file ->
         Column {
-            LocalImage(store.file(file.relativePath), file.kind, Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentScale = ContentScale.Fit)
-            Text(if (file.isEnhanced) "plate (enhanced copy)" else file.kind.replace('_', ' '), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LocalImage(store.file(file.relativePath), labels.getValue(file.kind), Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentScale = ContentScale.Fit)
+            Text(labels.getValue(file.kind), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -192,8 +215,6 @@ private fun Facts(v: ViolationEntity) {
         fact("Track", "#${v.trackId}")
         fact("Riders without helmet", "${v.noHelmetCount} of ${v.riderCount}")
         fact("Helmet confidence", v.helmetConfidence?.let { "%.2f".format(it) } ?: "—")
-        fact("Plate confidence", v.plateOcrConfidence?.let { "%.2f".format(it) } ?: "—")
-        fact("Plate status", v.plateOcrStatus.replace('_', ' '))
         fact("Model", v.modelVersion.ifBlank { "—" })
         fact("App", v.appVersion)
     }

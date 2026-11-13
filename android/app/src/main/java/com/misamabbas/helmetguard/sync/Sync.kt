@@ -33,6 +33,7 @@ import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.storage.storage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -137,6 +138,12 @@ class SyncWorker @AssistedInject constructor(
         } catch (e: RestException) {
             log(null, "Sign-in required: ${e.error}")
             Result.success()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Records stay safe on the phone, so anything unexpected just tries again later.
+            log(null, "Sync stopped: ${e.message}")
+            Result.retry()
         }
     }
 

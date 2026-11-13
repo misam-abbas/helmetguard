@@ -44,6 +44,7 @@ import com.misamabbas.helmetguard.ui.sessions.SessionsScreen
 import com.misamabbas.helmetguard.ui.settings.DiagnosticsScreen
 import com.misamabbas.helmetguard.ui.settings.SettingsScreen
 import com.misamabbas.helmetguard.ui.settings.SyncCenterScreen
+import com.misamabbas.helmetguard.ui.video.ReviewPlayerScreen
 import com.misamabbas.helmetguard.ui.video.VideoAnalysisScreen
 import com.misamabbas.helmetguard.ui.video.VideoSetupScreen
 import com.misamabbas.helmetguard.ui.violations.ViolationDetailScreen
@@ -56,6 +57,7 @@ private object Routes {
     const val VIDEO_SETUP = "video_setup"
     const val VIDEO_RUN = "video_run/{id}"
     const val SUMMARY = "summary/{id}"
+    const val REVIEW = "review/{id}"
     const val VIOLATIONS = "violations"
     const val VIOLATION = "violation/{id}"
     const val SESSIONS = "sessions"
@@ -118,6 +120,7 @@ private fun MainApp() {
                     onSettings = { nav.navigate(Routes.SETTINGS) },
                     onDiagnostics = { nav.navigate(Routes.DIAGNOSTICS) },
                     onSync = { nav.goToTab(Routes.SYNC) },
+                    onOpenAnalysis = { nav.navigate("video_run/$it") },
                 )
             }
             composable(Routes.DETECT) { DetectChooser(onLive = { nav.navigate(Routes.LIVE) }, onVideo = { nav.navigate(Routes.VIDEO_SETUP) }) }
@@ -134,8 +137,13 @@ private fun MainApp() {
                 })
             }
             composable(Routes.SUMMARY) { backStack ->
-                SessionSummaryScreen(backStack.arguments?.getString("id").orEmpty(), onOpenViolation = { nav.navigate("violation/$it") })
+                SessionSummaryScreen(
+                    backStack.arguments?.getString("id").orEmpty(),
+                    onOpenViolation = { nav.navigate("violation/$it") },
+                    onReview = { nav.navigate("review/$it") },
+                )
             }
+            composable(Routes.REVIEW) { backStack -> ReviewPlayerScreen(backStack.arguments?.getString("id").orEmpty()) }
             composable(Routes.VIOLATIONS) { ViolationsScreen(onOpen = { nav.navigate("violation/$it") }) }
             composable(Routes.VIOLATION) { backStack -> ViolationDetailScreen(backStack.arguments?.getString("id").orEmpty()) }
             composable(Routes.SESSIONS) {

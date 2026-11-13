@@ -8,6 +8,8 @@ import io.github.jan.supabase.auth.SessionManager
 import io.github.jan.supabase.auth.exception.NoSessionFoundException
 import io.github.jan.supabase.auth.user.UserSession
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -25,12 +27,17 @@ class EncryptedSessionStore @Inject constructor(@ApplicationContext context: Con
     private val file = File(context.noBackupFilesDir, "session.bin")
     private val json = Json { ignoreUnknownKeys = true }
 
-    override suspend fun saveSession(session: UserSession) = withContext(Dispatchers.IO) {
-        val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
-        val encrypted = cipher.doFinal(json.encodeToString(UserSession.serializer(), session).toByteArray())
-        val temp = File(file.parentFile, "${file.name}.tmp")
-        temp.writeBytes(byteArrayOf(cipher.iv.size.toByte()) + cipher.iv + encrypted)
-        check(temp.renameTo(file)) { "Could not store session" }
+    // The app and the background sync can both refresh the login at the same moment.
+    private val writeLock = Mutex()
+
+    override suspend fun saveSession(session: UserSession) = writeLock.withLock {
+        withContext(Dispatchers.IO) {
+            val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
+            val encrypted = cipher.doFinal(json.encodeToString(UserSession.serializer(), session).toByteArray())
+            val temp = File(file.parentFile, "${file.name}.tmp")
+            temp.writeBytes(byteArrayOf(cipher.iv.size.toByte()) + cipher.iv + encrypted)
+            check(temp.renameTo(file)) { "Could not store session" }
+        }
     }
 
     override suspend fun loadSession(): UserSession = withContext(Dispatchers.IO) {
@@ -46,7 +53,7 @@ class EncryptedSessionStore @Inject constructor(@ApplicationContext context: Con
     }
 
     override suspend fun deleteSession() {
-        withContext(Dispatchers.IO) { file.delete() }
+        writeLock.withLock { withContext(Dispatchers.IO) { file.delete() } }
     }
 
     private fun key(): SecretKey {

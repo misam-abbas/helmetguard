@@ -116,12 +116,11 @@ class SummaryViewModel @Inject constructor(db: AppDatabase, val store: EvidenceS
 }
 
 @Composable
-fun SessionSummaryScreen(id: String, onOpenViolation: (String) -> Unit, viewModel: SummaryViewModel = hiltViewModel()) {
+fun SessionSummaryScreen(id: String, onOpenViolation: (String) -> Unit, onReview: (String) -> Unit, viewModel: SummaryViewModel = hiltViewModel()) {
     LaunchedEffect(id) { viewModel.load(id) }
     val session by viewModel.session.collectAsStateWithLifecycle()
     val violations by viewModel.violations.collectAsStateWithLifecycle()
     val s = session ?: return
-    val plates = violations.count { it.plateTextOcr != null }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(titleOf(s), style = MaterialTheme.typography.headlineSmall, maxLines = 1)
@@ -134,7 +133,10 @@ fun SessionSummaryScreen(id: String, onOpenViolation: (String) -> Unit, viewMode
             StatCard("Riders", s.ridersTotal.toString(), Modifier.weight(1f))
         }
         Text("With helmet ${s.ridersHelmet} · Without ${s.ridersNoHelmet} · Unknown ${s.ridersUnknown}", style = MaterialTheme.typography.bodySmall)
-        Text("Plates read $plates · Unreadable ${violations.size - plates} · Frames ${s.framesProcessed}" + (s.avgFps?.let { " · %.1f FPS".format(it) } ?: ""), style = MaterialTheme.typography.bodySmall)
+        Text("Frames ${s.framesProcessed}" + (s.avgFps?.let { " · %.1f FPS".format(it) } ?: ""), style = MaterialTheme.typography.bodySmall)
+        if (s.source == "video") {
+            OutlinedButton({ onReview(s.id) }, Modifier.fillMaxWidth()) { Text("Review video with boxes") }
+        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(violations, key = { it.id }) { row -> ViolationCard(row, viewModel.store, onOpenViolation) }
         }

@@ -10,8 +10,7 @@ const SECTIONS = [
   {
     title: "What is collected",
     items: [
-      "Photos of motorcycles flagged by the AI: the road scene, crops of the motorcycle, riders, bare heads and the number plate.",
-      "Plate text read on the phone, with the OCR engine's confidence.",
+      "Photos of motorcycles flagged by the AI: the road scene, a picture of the whole motorcycle, the riders and their bare heads.",
       "Session totals, a typed location label, the time, and which device and operator captured the record.",
     ],
   },
@@ -19,6 +18,7 @@ const SECTIONS = [
     title: "What is never done",
     items: [
       "No face is recognised or matched. Head crops are used only to decide helmet or no helmet.",
+      "Number plates are not detected, read or stored.",
       "No fines are issued. Every record stays an unverified AI alert until a person reviews it.",
       "GPS coordinates are not collected by default.",
     ],

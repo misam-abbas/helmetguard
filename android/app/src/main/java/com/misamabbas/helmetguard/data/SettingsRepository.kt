@@ -34,6 +34,7 @@ data class AppSettings(
     val jpegQuality: Int = 88,
     val localCleanupDays: Int = 7,
     val wifiOnly: Boolean = false,
+    val evidenceLock: Boolean = false,
 ) {
     fun verifier() = VerifierSettings(
         minNoHelmetObservations = minNoHelmetObservations,
@@ -55,6 +56,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val jpeg = intPreferencesKey("jpeg_quality")
         val cleanup = intPreferencesKey("local_cleanup_days")
         val wifi = booleanPreferencesKey("wifi_only")
+        val lock = booleanPreferencesKey("evidence_lock")
         val source = stringPreferencesKey("source_filter")
         val deviceId = stringPreferencesKey("device_id")
     }
@@ -71,6 +73,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         jpegQuality = p[K.jpeg] ?: 88,
         localCleanupDays = p[K.cleanup] ?: 7,
         wifiOnly = p[K.wifi] ?: false,
+        evidenceLock = p[K.lock] ?: false,
     )
 
     suspend fun current(): AppSettings = settings.first()
@@ -86,6 +89,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
             p[K.jpeg] = value.jpegQuality
             p[K.cleanup] = value.localCleanupDays
             p[K.wifi] = value.wifiOnly
+            p[K.lock] = value.evidenceLock
         }
     }
 

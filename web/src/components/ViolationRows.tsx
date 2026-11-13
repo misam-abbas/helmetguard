@@ -1,16 +1,15 @@
 import { ImageOff } from "lucide-react";
 import Link from "next/link";
-import { formatClipTime, formatDateTime, plateLabel } from "@/lib/format";
+import { formatClipTime, formatDateTime } from "@/lib/format";
 import type { Violation } from "@/lib/types";
-import { OcrBadge, ReviewBadge, SourceTag } from "./ui";
+import { ReviewBadge, SourceTag } from "./ui";
 
-export type ViolationRow = Pick<
-  Violation,
-  "id" | "source" | "detected_at" | "video_timestamp_ms" | "plate_text_final" | "plate_ocr_status" | "review_status"
-> & { session: { video_file_name: string | null; location_label: string | null } | null };
+export type ViolationRow = Pick<Violation, "id" | "source" | "detected_at" | "video_timestamp_ms" | "no_helmet_count" | "rider_count" | "review_status"> & {
+  session: { video_file_name: string | null; location_label: string | null } | null;
+};
 
 export const VIOLATION_ROW_COLUMNS =
-  "id, source, detected_at, video_timestamp_ms, plate_text_final, plate_ocr_status, review_status, session:detection_sessions(video_file_name, location_label)";
+  "id, source, detected_at, video_timestamp_ms, no_helmet_count, rider_count, review_status, session:detection_sessions(video_file_name, location_label)";
 
 function Thumb({ url }: { url?: string }) {
   if (!url) {
@@ -26,9 +25,13 @@ function Thumb({ url }: { url?: string }) {
   return <img src={url} alt="Violation thumbnail" loading="lazy" className="h-12 w-16 rounded object-cover" />;
 }
 
-function PlateText({ row }: { row: ViolationRow }) {
-  if (!row.plate_text_final) return <span className="whitespace-nowrap text-sm text-ink-3">{plateLabel(null, row.plate_ocr_status)}</span>;
-  return <span className="plate truncate text-sm font-medium">{row.plate_text_final}</span>;
+// Number plates are not detected, so a row is described by its riders.
+function Riders({ row }: { row: ViolationRow }) {
+  return (
+    <span className="whitespace-nowrap text-sm font-medium">
+      {row.no_helmet_count || 1} of {row.rider_count || 1} without helmet
+    </span>
+  );
 }
 
 function Where({ row }: { row: ViolationRow }) {
@@ -53,14 +56,13 @@ export function ViolationRows({ rows, thumbs }: { rows: ViolationRow[]; thumbs: 
               <Thumb url={thumbs.get(row.id)} />
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex items-center justify-between gap-2">
-                  <PlateText row={row} />
+                  <Riders row={row} />
                   <SourceTag source={row.source} />
                 </div>
                 <p className="tabular text-xs text-ink-2">{formatDateTime(row.detected_at)}</p>
                 <Where row={row} />
                 <div className="flex flex-wrap gap-1.5">
                   <ReviewBadge status={row.review_status} />
-                  <OcrBadge status={row.plate_ocr_status} />
                 </div>
               </div>
             </Link>
@@ -75,7 +77,7 @@ export function ViolationRows({ rows, thumbs }: { rows: ViolationRow[]; thumbs: 
               <th className="px-4 py-2.5 font-medium">Photo</th>
               <th className="px-4 py-2.5 font-medium">Time (PKT)</th>
               <th className="px-4 py-2.5 font-medium">Source</th>
-              <th className="px-4 py-2.5 font-medium">Plate and OCR</th>
+              <th className="px-4 py-2.5 font-medium">Riders</th>
               <th className="px-4 py-2.5 font-medium">Review</th>
             </tr>
           </thead>
@@ -102,10 +104,7 @@ export function ViolationRows({ rows, thumbs }: { rows: ViolationRow[]; thumbs: 
                   )}
                 </td>
                 <td className="px-4 py-2">
-                  <PlateText row={row} />
-                  <div className="mt-1">
-                    <OcrBadge status={row.plate_ocr_status} />
-                  </div>
+                  <Riders row={row} />
                 </td>
                 <td className="px-4 py-2">
                   <ReviewBadge status={row.review_status} />

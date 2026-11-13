@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, FileWarning, Layers, LayoutDashboard, LogOut, Menu, Settings, Shield, ShieldCheck, Users, X } from "lucide-react";
+import { BarChart3, FileWarning, KeyRound, Layers, LayoutDashboard, LogOut, Menu, Settings, Shield, ShieldCheck, Users, Video, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -10,6 +10,7 @@ import { cn } from "./ui";
 const STAFF_LINKS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/violations", label: "Violations", icon: FileWarning },
+  { href: "/detect", label: "Analyse video", icon: Video },
   { href: "/sessions", label: "Sessions", icon: Layers },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ];
@@ -54,16 +55,26 @@ export function AppShell({
         <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
           {links.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
-            return (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setOpen(false)}
-                aria-current={active ? "page" : undefined}
-                className={cn("flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm", active ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:bg-surface-2")}
-              >
+            const props = {
+              onClick: () => setOpen(false),
+              "aria-current": active ? ("page" as const) : undefined,
+              className: cn("flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm", active ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:bg-surface-2"),
+            };
+            const content = (
+              <>
                 <Icon className="size-4" aria-hidden />
                 {label}
+              </>
+            );
+            // The video page loads in full so the browser applies its cross-origin isolation,
+            // which lets detection use several CPU threads.
+            return href === "/detect" ? (
+              <a key={href} href={href} {...props}>
+                {content}
+              </a>
+            ) : (
+              <Link key={href} href={href} {...props}>
+                {content}
               </Link>
             );
           })}
@@ -75,6 +86,9 @@ export function AppShell({
           </div>
           <div className="flex shrink-0 items-center">
             <ThemeToggle />
+            <Link href="/reset-password" aria-label="Change password" title="Change password" className="inline-flex size-9 items-center justify-center rounded-md text-ink-2 hover:bg-surface-2">
+              <KeyRound className="size-4" aria-hidden />
+            </Link>
             <form action={signOut}>
               <button type="submit" aria-label="Sign out" className="inline-flex size-9 items-center justify-center rounded-md text-ink-2 hover:bg-surface-2">
                 <LogOut className="size-4" aria-hidden />

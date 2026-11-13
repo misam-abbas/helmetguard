@@ -1,6 +1,7 @@
 package com.misamabbas.helmetguard.pipeline
 
 import android.graphics.Bitmap
+import android.os.SystemClock
 import com.misamabbas.helmetguard.ml.Detector
 import com.misamabbas.helmetguard.ml.Letterboxer
 import com.misamabbas.helmetguard.vision.evidence.BestFrames
@@ -30,9 +31,16 @@ import com.misamabbas.helmetguard.vision.verify.ViolationStateMachine
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
 
-enum class OverlayKind { MOTORCYCLE, HELMET, NO_HELMET, UNDECIDED, PLATE }
+enum class OverlayKind { MOTORCYCLE, HELMET, NO_HELMET, UNDECIDED }
 
-data class OverlayBox(val box: Box, val label: String, val kind: OverlayKind)
+data class OverlayBox(
+    val box: Box,
+    val label: String,
+    val kind: OverlayKind,
+    /** Pixels per second, so the overlay can glide between processed frames. */
+    val velocityX: Float = 0f,
+    val velocityY: Float = 0f,
+)
 
 data class FrameOutput(
     val frameWidth: Int,
@@ -41,6 +49,8 @@ data class FrameOutput(
     val activeTracks: Int,
     val stage1Ms: Float,
     val stage2Ms: Float,
+    /** Device uptime when this result was ready. */
+    val producedAtMs: Long = 0,
 )
 
 data class SessionTotals(
@@ -63,7 +73,8 @@ class EvidenceFrame(
     val score: Float,
 )
 
-class PlateCrop(val jpeg: ByteArray, val width: Int, val height: Int, val timestampMs: Long)
+/** The optional full-resolution camera still of a confirmed bike. */
+class StillPhoto(val jpeg: ByteArray, val width: Int, val height: Int)
 
 data class PipelineConfig(
     val verifier: VerifierSettings,
@@ -79,14 +90,14 @@ class TrackRecord(val trackId: Int, val verifier: VerifierSettings, memory: Evid
     val votes = HelmetVoteBook(verifier)
     val machine = ViolationStateMachine(verifier)
     val frames = BestFrames<EvidenceFrame>(3) { memory.release(it.jpeg.size) }
-    val plates = BestFrames<PlateCrop>(5) { memory.release(it.jpeg.size) }
     var lastDetailFrame = 0L
     var violationId: String? = null
     var framesObserved = 0
     var motorcycleConfidenceSum = 0f
     var histogram: FloatArray? = null
     var lastTrack: Track? = null
-    var plateCandidates = 0
+    var stillRequested = false
+    @Volatile var still: StillPhoto? = null
     val motorcycleConfidence: Float get() = if (framesObserved == 0) 0f else motorcycleConfidenceSum / framesObserved
 }
 
@@ -107,6 +118,9 @@ interface ViolationListener {
     fun onConfirmed(record: TrackRecord, timestampMs: Long)
     fun onFinalised(record: TrackRecord, timestampMs: Long)
     fun onTotals(totals: SessionTotals)
+
+    /** A confirmed bike is in the evidence zone. Live mode answers with a camera still. */
+    fun onStillWanted(record: TrackRecord) = Unit
 }
 
 /**
@@ -154,11 +168,17 @@ class FrameProcessor(
 
         result.active.forEach { track ->
             val record = record(track)
+            val wantsStill = record.machine.state == TrackState.CONFIRMED && !record.stillRequested &&
+                (config.evidenceZone == null || isInEvidenceZone(track.box, width, height))
+            if (wantsStill) {
+                record.stillRequested = true
+                listener.onStillWanted(record)
+            }
             if (record.machine.onTick(timestampMs, trackEnded = false)) listener.onFinalised(record, timestampMs)
         }
         result.ended.forEach { endTrack(it, timestampMs) }
 
-        return FrameOutput(frame.width, frame.height, overlay(result.active, details), result.active.size, stage1Ms, stage2Ms)
+        return FrameOutput(frame.width, frame.height, overlay(result.active, details), result.active.size, stage1Ms, stage2Ms, SystemClock.uptimeMillis())
     }
 
     /** Ends every open track when the session stops, so nothing already seen is lost. */
@@ -202,11 +222,14 @@ class FrameProcessor(
             record.framesObserved++
             record.motorcycleConfidenceSum += track.confidence
 
-            val mapping = box.draw(frame, track.box)
+            // The head model was trained on bike crops with this much margin, and the
+            // margin keeps a head that pokes above a tight box.
+            val region = track.box.expand(DETAIL_PADDING, width, height)
+            val mapping = box.draw(frame, region)
             val found = detector.detect(box.bitmap, DETAIL_MIN_CONFIDENCE).mapNotNull { raw ->
                 kinds.getOrNull(raw.classId)?.let { DetailDetection(mapping.toSource(raw.box), it, raw.confidence) }
             }
-            val details = Association.associate(track.box, found)
+            val details = Association.associate(region, found)
             output[track.id] = details
 
             observe(record, track, details, frame, timestampMs, active, width, height)
@@ -261,7 +284,6 @@ class FrameProcessor(
                 frameHeight = height,
                 sharpness = sharpness,
                 confidence = track.confidence,
-                plateVisible = details.plate != null,
                 overlapWithOther = active.filter { it.id != track.id }.maxOfOrNull { it.box.iou(track.box) } ?: 0f,
             ),
         )
@@ -274,29 +296,6 @@ class FrameProcessor(
                 record.frames.offer(score, EvidenceFrame(jpeg, frame.width, frame.height, timestampMs, track.box, details.riders, score))
             }
         }
-
-        details.plate?.let { collectPlate(record, it, frame, sharpness, timestampMs) }
-    }
-
-    private fun collectPlate(record: TrackRecord, plate: DetailDetection, frame: Bitmap, sharpness: Double, timestampMs: Long) {
-        val padX = plate.box.width * PLATE_PADDING
-        val padY = plate.box.height * PLATE_PADDING
-        val left = (plate.box.left - padX).toInt().coerceIn(0, frame.width - 1)
-        val top = (plate.box.top - padY).toInt().coerceIn(0, frame.height - 1)
-        val right = (plate.box.right + padX).toInt().coerceIn(left + 1, frame.width)
-        val bottom = (plate.box.bottom + padY).toInt().coerceIn(top + 1, frame.height)
-        val w = right - left
-        val h = bottom - top
-        if (h < MIN_PLATE_HEIGHT) return
-        val aspect = w.toFloat() / h
-        if (aspect !in MIN_PLATE_ASPECT..MAX_PLATE_ASPECT) return
-
-        val score = h / 100f + (sharpness / 500.0).toFloat().coerceAtMost(1f) + plate.confidence
-        record.plateCandidates++
-        val crop = Bitmap.createBitmap(frame, left, top, w, h)
-        val jpeg = compress(crop)
-        crop.recycle()
-        if (memory.tryReserve(jpeg.size)) record.plates.offer(score, PlateCrop(jpeg, w, h, timestampMs))
     }
 
     private fun compress(bitmap: Bitmap): ByteArray {
@@ -320,7 +319,6 @@ class FrameProcessor(
             violations = totals.violations + if (record.violationId != null) 1 else 0,
         )
         record.frames.best().forEach { memory.release(it.jpeg.size) }
-        record.plates.best().forEach { memory.release(it.jpeg.size) }
         listener.onTotals(totals)
     }
 
@@ -333,36 +331,35 @@ class FrameProcessor(
                 TrackState.CONFIRMED, TrackState.FINALISED -> OverlayKind.NO_HELMET
                 else -> OverlayKind.UNDECIDED
             }
-            boxes += OverlayBox(track.box, "#${track.id} Motorcycle ${"%.2f".format(track.confidence)}", kind)
+            val vx = track.velocityX
+            val vy = track.velocityY
+            boxes += OverlayBox(track.box, "#${track.id} Motorcycle ${"%.2f".format(track.confidence)}", kind, vx, vy)
             details[track.id]?.let { bike ->
                 bike.riders.forEach { rider ->
                     val head = rider.headBox ?: return@forEach
                     when (rider.head) {
-                        HeadState.HELMET -> boxes += OverlayBox(head, "Helmet ${"%.2f".format(rider.headConfidence)}", OverlayKind.HELMET)
-                        HeadState.NO_HELMET -> boxes += OverlayBox(head, "No helmet ${"%.2f".format(rider.headConfidence)}", OverlayKind.NO_HELMET)
+                        HeadState.HELMET -> boxes += OverlayBox(head, "Helmet ${"%.2f".format(rider.headConfidence)}", OverlayKind.HELMET, vx, vy)
+                        HeadState.NO_HELMET -> boxes += OverlayBox(head, "No helmet ${"%.2f".format(rider.headConfidence)}", OverlayKind.NO_HELMET, vx, vy)
                         null -> Unit
                     }
                 }
-                bike.plate?.let { boxes += OverlayBox(it.box, "Plate", OverlayKind.PLATE) }
             }
         }
         return boxes
     }
 
+    /** Number plates are deliberately not used, so a model that still has a plate class has it dropped. */
     private fun kindOf(name: String): DetailKind? = when (name.lowercase()) {
         "rider" -> DetailKind.RIDER
         "helmet" -> DetailKind.HELMET
         "no_helmet" -> DetailKind.NO_HELMET
-        "plate" -> DetailKind.PLATE
         else -> null
     }
 
     private companion object {
         const val METRICS_SIZE = 160
         const val DETAIL_MIN_CONFIDENCE = 0.25f
-        const val PLATE_PADDING = 0.08f
-        const val MIN_PLATE_HEIGHT = 20
-        const val MIN_PLATE_ASPECT = 0.8f
-        const val MAX_PLATE_ASPECT = 6f
+        // Same as CROP_PADDING in ml/scripts/prepare_public_dataset.py.
+        const val DETAIL_PADDING = 0.08f
     }
 }

@@ -4,16 +4,16 @@ The full plan is the "HelmetGuard – Technical Planning Document" (7 Nov 2026).
 
 ## System
 
-The phone does all detection, verification, OCR and storage by itself. Supabase receives only finished records, and the dashboard reads them under each reviewer's own permissions. No paid inference server is involved.
+The phone does all detection, verification and storage by itself. Supabase receives only finished records, and the dashboard reads them under each reviewer's own permissions. No paid inference server is involved. The dashboard can also analyse a video in the reviewer's browser with the same models; the video never leaves their computer.
 
 ## Decisions (approved 7 Nov 2026)
 
 | # | Decision | Choice |
 |---|---|---|
-| 1 | Licence | Public repository, AGPL-3.0, Ultralytics YOLO26n |
+| 1 | Licence | Public repository, AGPL-3.0, Ultralytics YOLO (YOLOv8n first, YOLO11n from the second models; see `ml/README.md`) |
 | 2 | Helmet rule | Every rider including pillion; driver vs pillion recorded |
 | 3 | Supabase | Two projects: `helmetguard-dev`, `helmetguard-prod` |
-| 4 | Email confirmation | Off; admin approval gates every account |
+| 4 | Email confirmation | Changed 10 Nov 2026 at the owner's request: a code is emailed at sign-up, then an admin approves the account. Needs the Supabase settings in `docs/supabase-email.md`; until then sign-up works as before |
 | 5 | Test phone | Google Pixel 7a, 8 GB, Android 17 |
 | 6 | Recording permission | **Still needed before filming** |
 | 7 | Disabled account's unsynced data | Kept encrypted until an admin decides |
@@ -28,7 +28,9 @@ The phone does all detection, verification, OCR and storage by itself. Supabase 
 | Dashboard | https://helmetguard.vercel.app (Vercel project `helmetguard`) |
 | Backend | Supabase project `helmetguard-dev`, ref `aqywebxmkbgxvhjlcvhl`, Mumbai |
 
-`helmetguard-prod` (decision 3) is not created yet; the plan makes that Phase 19. The dashboard was deployed by direct upload because the GitHub repository does not exist yet, so it does not redeploy on push until the repository is connected. When connecting it, set Vercel's Root Directory to `web`.
+| Source | https://github.com/misam-abbas/helmetguard |
+
+`helmetguard-prod` (decision 3) is not created yet; the plan makes that Phase 19. The live dashboard is deployed by direct upload, so it does not redeploy on push until the repository is connected in Vercel's project settings (that needs a GitHub login connection on the Vercel account). Vercel's Root Directory is already set to `web`. A direct upload has only the `web` folder, so its build downloads the detection models from the GitHub commit pinned in `web/models.lock.json` and checks their SHA-256; run `node web/scripts/lock-models.mjs` after committing new models.
 
 ## Where the build differs from the plan
 
@@ -38,5 +40,6 @@ The phone does all detection, verification, OCR and storage by itself. Supabase 
 - **Hand-written UI primitives** in `web/src/components/ui.tsx`, in the style of shadcn/ui, instead of running its installer. Replace them if you add many more components.
 - **TypeScript 5.9 and ESLint 9** rather than the newest majors, because of compatibility with Next.js 16's tooling.
 - **Tracker matching is greedy best-overlap-first** rather than the Hungarian algorithm. It is simpler and is enough for a tripod view. Revisit it if Phase 9 measurements show ID switches.
-- **A human's plate differs by more than one character:** two clearly different plates never merge in duplicate prevention, even if position or colour agree. The plan listed these as alternatives; this avoids merging two real bikes.
+- **No number plates (owner's decision, 10 Nov 2026).** Plates are not detected, read or stored. The evidence for a rider without a helmet is a picture of the whole motorcycle with its riders, plus the full frame. Duplicate prevention uses position, time and colour only. The database's plate columns stay, unused.
+- **Stage 1 sees 640 × 640 from the second models** (the plan says 416), because distant and half-visible bikes were missed at 416. The head model gets the bike crop with an 8% margin on every side, as in training.
 - **Position-only duplicate matching stops after 2 seconds**, because the next bike arrives in the same lane.

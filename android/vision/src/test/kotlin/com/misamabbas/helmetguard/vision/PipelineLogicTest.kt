@@ -33,17 +33,27 @@ class PipelineLogicTest {
     }
 
     @Test
-    fun `a head without a rider box still counts as a person`() {
-        val details = Association.associate(bike, listOf(head(150f, DetailKind.NO_HELMET)))
-        assertEquals(HeadState.NO_HELMET, details.riders.single().head)
+    fun `the padded crop keeps a head poking above a tight bike box`() {
+        val tight = Box(100f, 130f, 400f, 500f)
+        val padded = tight.expand(0.08f, 1920f, 1080f)
+        assertEquals(76f, padded.left, 0.01f)
+        assertEquals(100.4f, padded.top, 0.01f)
+        assertEquals(424f, padded.right, 0.01f)
+        assertEquals(529.6f, padded.bottom, 0.01f)
+        val headAbove = DetailDetection(Box(200f, 105f, 240f, 145f), DetailKind.NO_HELMET, 0.9f)
+        assertTrue(Association.associate(tight, listOf(headAbove)).riders.isEmpty())
+        assertEquals(HeadState.NO_HELMET, Association.associate(padded, listOf(headAbove)).riders.single().head)
     }
 
     @Test
-    fun `keeps the most confident plate`() {
-        val low = DetailDetection(Box(200f, 420f, 260f, 450f), DetailKind.PLATE, 0.5f)
-        val high = DetailDetection(Box(210f, 425f, 270f, 455f), DetailKind.PLATE, 0.9f)
-        assertEquals(high, Association.associate(bike, listOf(low, high)).plate)
-        assertNull(Association.associate(bike, emptyList()).plate)
+    fun `padding stays inside the frame`() {
+        assertEquals(Box(0f, 0f, 640f, 360f), Box(5f, 5f, 635f, 355f).expand(0.08f, 640f, 360f))
+    }
+
+    @Test
+    fun `a head without a rider box still counts as a person`() {
+        val details = Association.associate(bike, listOf(head(150f, DetailKind.NO_HELMET)))
+        assertEquals(HeadState.NO_HELMET, details.riders.single().head)
     }
 
     @Test

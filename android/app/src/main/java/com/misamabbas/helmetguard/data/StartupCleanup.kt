@@ -2,6 +2,7 @@ package com.misamabbas.helmetguard.data
 
 import com.misamabbas.helmetguard.data.db.AppDatabase
 import com.misamabbas.helmetguard.data.db.SyncState
+import com.misamabbas.helmetguard.video.VideoAnalysisManager
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -11,10 +12,14 @@ class StartupCleanup @Inject constructor(
     private val db: AppDatabase,
     private val store: EvidenceStore,
     private val settings: SettingsRepository,
+    private val analysis: VideoAnalysisManager,
 ) {
     suspend fun run() {
-        db.sessions().markActiveInterrupted()
-        store.removeOrphans()
+        // A video can still be running in the background when the app is reopened.
+        if (!analysis.isRunning) {
+            db.sessions().markActiveInterrupted()
+            store.removeOrphans()
+        }
 
         // A provisional record whose app died before finalisation is still a real alert,
         // so it is queued without photos rather than thrown away.

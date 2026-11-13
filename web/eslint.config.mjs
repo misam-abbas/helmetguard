@@ -5,5 +5,6 @@ import nextTs from "eslint-config-next/typescript";
 export default defineConfig([
   ...nextVitals,
   ...nextTs,
-  globalIgnores([".next/**", "next-env.d.ts"]),
+  // public/ort holds ONNX Runtime's own minified files, copied in before dev and build.
+  globalIgnores([".next/**", "next-env.d.ts", "public/ort/**", "public/models/**"]),
 ]);

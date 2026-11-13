@@ -1,7 +1,6 @@
 package com.misamabbas.helmetguard.vision.verify
 
 import com.misamabbas.helmetguard.vision.geometry.Box
-import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -12,14 +11,12 @@ data class RecentEvent(
     val lastBox: Box,
     val velocityX: Float,
     val velocityY: Float,
-    val plateText: String?,
     val colorHistogram: FloatArray?,
 )
 
 data class Candidate(
     val timestampMs: Long,
     val box: Box,
-    val plateText: String?,
     val colorHistogram: FloatArray?,
 )
 
@@ -33,7 +30,8 @@ data class DedupSettings(
 
 /**
  * Layers two and three of duplicate prevention: a new confirmation inside the window
- * merges into an existing event when plate, predicted position or colour agree.
+ * merges into an existing event when its predicted position or its colour agrees.
+ * Number plates are not read, so they play no part.
  */
 class Deduplicator(private val settings: DedupSettings = DedupSettings()) {
     private val recent = ArrayDeque<RecentEvent>()
@@ -53,13 +51,6 @@ class Deduplicator(private val settings: DedupSettings = DedupSettings()) {
     }
 
     private fun matches(event: RecentEvent, candidate: Candidate): Boolean {
-        val a = event.plateText
-        val b = candidate.plateText
-        if (!a.isNullOrEmpty() && !b.isNullOrEmpty()) {
-            // Two clearly different plates are two bikes, whatever else looks alike.
-            return editDistanceAtMostOne(a, b)
-        }
-
         val dtMs = candidate.timestampMs - event.timestampMs
         if (dtMs <= settings.positionWindowMs) {
             val seconds = dtMs / 1000f
@@ -78,30 +69,6 @@ class Deduplicator(private val settings: DedupSettings = DedupSettings()) {
     }
 
     companion object {
-        fun editDistanceAtMostOne(a: String, b: String): Boolean {
-            if (abs(a.length - b.length) > 1) return false
-            var i = 0
-            var j = 0
-            var edits = 0
-            while (i < a.length && j < b.length) {
-                if (a[i] == b[j]) {
-                    i++
-                    j++
-                    continue
-                }
-                if (++edits > 1) return false
-                when {
-                    a.length > b.length -> i++
-                    a.length < b.length -> j++
-                    else -> {
-                        i++
-                        j++
-                    }
-                }
-            }
-            return edits + (a.length - i) + (b.length - j) <= 1
-        }
-
         fun cosine(a: FloatArray, b: FloatArray): Float {
             val n = min(a.size, b.size)
             var dot = 0f

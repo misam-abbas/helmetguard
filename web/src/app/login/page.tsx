@@ -10,8 +10,11 @@ export const metadata: Metadata = { title: "Sign in" };
 
 const ERRORS: Record<string, string> = {
   credentials: "That email and password do not match an account.",
+  unconfirmed: "Confirm your email first. Create the account again to get a new code.",
   short: "Use a password of at least 8 characters.",
   signup: "That account could not be created. It may already exist.",
+  expired: "That sign-up took too long. Start again.",
+  link: "That email link has expired or was already used, or it was opened in a different browser. Ask for a new one, or use the code from the email.",
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -27,7 +30,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </div>
         <h1 className="text-xl font-semibold tracking-tight">{signup ? "Create an account" : "Sign in to review alerts"}</h1>
         <p className="mb-5 mt-1 text-sm text-ink-2">
-          {signup ? "An admin must approve your account before you can use it." : "For approved reviewers and administrators."}
+          {signup ? "We will email you a code to confirm your address. Then an admin approves your account." : "For approved reviewers and administrators."}
         </p>
 
         {error && <Notice tone="bad">{error}</Notice>}
@@ -49,6 +52,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </label>
           <SubmitButton className="w-full">{signup ? "Create account" : "Sign in"}</SubmitButton>
         </form>
+
+        {!signup && (
+          <p className="mt-3 text-sm">
+            <Link href="/forgot-password" className="font-medium text-ink underline underline-offset-2">
+              Forgot password?
+            </Link>
+          </p>
+        )}
 
         <p className="mt-4 text-sm text-ink-2">
           {signup ? "Already have an account? " : "New here? "}

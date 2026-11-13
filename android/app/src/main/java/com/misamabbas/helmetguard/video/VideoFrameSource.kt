@@ -2,6 +2,7 @@ package com.misamabbas.helmetguard.video
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.media.Image
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
@@ -9,11 +10,8 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import com.misamabbas.helmetguard.camera.FrameConverter
-import org.opencv.android.OpenCVLoader
-import org.opencv.android.Utils
-import org.opencv.core.CvType
-import org.opencv.core.Mat
-import org.opencv.imgproc.Imgproc
+import com.misamabbas.helmetguard.vision.image.Yuv420
+import com.misamabbas.helmetguard.vision.image.YuvPlane
 import kotlin.math.max
 
 class UnsupportedVideoException(message: String) : Exception(message)
@@ -30,7 +28,6 @@ class VideoFrameSource(private val context: Context, private val uri: Uri) {
      * Stops early when [shouldContinue] returns false.
      */
     fun decode(startMs: Long, everyMs: Long, shouldContinue: () -> Boolean, onFrame: (Bitmap, Long) -> Unit) {
-        check(OpenCVLoader.initLocal()) { "OpenCV failed to load" }
         val extractor = MediaExtractor()
         extractor.setDataSource(context, uri, null)
 
@@ -62,10 +59,9 @@ class VideoFrameSource(private val context: Context, private val uri: Uri) {
         var inputDone = false
         var outputDone = false
         var nextDueMs = startMs
-        val yuv = Mat()
-        val rgba = Mat()
         var bitmap: Bitmap? = null
-        var nv21 = ByteArray(0)
+        var pixels = IntArray(0)
+        val planes = arrayOfNulls<ByteArray>(3)
 
         try {
             while (!outputDone && shouldContinue()) {
@@ -92,20 +88,18 @@ class VideoFrameSource(private val context: Context, private val uri: Uri) {
                 if (wanted) {
                     val image = codec.getOutputImage(outIndex)
                     if (image != null) {
-                        val w = image.width
-                        val h = image.height
-                        if (nv21.size != w * h * 3 / 2) nv21 = ByteArray(w * h * 3 / 2)
-                        toNv21(image, nv21)
+                        // Decoders often pad the picture (1088 rows for 1080p video); the crop is the real frame.
+                        val crop = image.cropRect.takeUnless { it.isEmpty } ?: Rect(0, 0, image.width, image.height)
+                        val w = crop.width()
+                        val h = crop.height()
+                        if (pixels.size != w * h) pixels = IntArray(w * h)
+                        val (y, u, v) = image.planes.mapIndexed { index, plane -> copyPlane(plane, planes, index) }
+                        Yuv420.toArgb(y, u, v, crop.left, crop.top, w, h, pixels)
                         image.close()
-
-                        if (yuv.rows() != h * 3 / 2 || yuv.cols() != w) yuv.create(h * 3 / 2, w, CvType.CV_8UC1)
-                        yuv.put(0, 0, nv21)
-                        // OpenCV handles the colour-format differences between phones.
-                        Imgproc.cvtColor(yuv, rgba, Imgproc.COLOR_YUV2RGBA_NV21)
 
                         val target = bitmap?.takeIf { it.width == w && it.height == h }
                             ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { bitmap = it }
-                        Utils.matToBitmap(rgba, target)
+                        target.setPixels(pixels, 0, w, 0, 0, w, h)
 
                         val upright = if (rotation == 0) target else converter.rotate(target, w, h, rotation)
                         onFrame(upright, ptsMs)
@@ -115,36 +109,20 @@ class VideoFrameSource(private val context: Context, private val uri: Uri) {
                 codec.releaseOutputBuffer(outIndex, false)
             }
         } finally {
-            yuv.release()
-            rgba.release()
             runCatching { codec.stop() }
             codec.release()
             extractor.release()
         }
     }
 
-    /** Copies any flexible YUV 4:2:0 layout into one NV21 array. */
-    private fun toNv21(image: Image, out: ByteArray) {
-        val w = image.width
-        val h = image.height
-        val (yPlane, uPlane, vPlane) = image.planes.let { Triple(it[0], it[1], it[2]) }
-
-        var position = 0
-        val row = ByteArray(yPlane.rowStride.coerceAtLeast(w))
-        for (y in 0 until h) {
-            val buffer = yPlane.buffer
-            buffer.position(y * yPlane.rowStride)
-            buffer.get(row, 0, minOf(w, buffer.remaining()))
-            System.arraycopy(row, 0, out, position, w)
-            position += w
-        }
-
-        for (y in 0 until h / 2) {
-            for (x in 0 until w / 2) {
-                out[position++] = vPlane.buffer.get(y * vPlane.rowStride + x * vPlane.pixelStride)
-                out[position++] = uPlane.buffer.get(y * uPlane.rowStride + x * uPlane.pixelStride)
-            }
-        }
+    /** Copies one plane out of the decoder's buffer, reusing the array from the last frame. */
+    private fun copyPlane(plane: Image.Plane, reuse: Array<ByteArray?>, index: Int): YuvPlane {
+        val buffer = plane.buffer
+        buffer.rewind()
+        val size = buffer.remaining()
+        val data = reuse[index]?.takeIf { it.size == size } ?: ByteArray(size).also { reuse[index] = it }
+        buffer.get(data, 0, size)
+        return YuvPlane(data, plane.rowStride, plane.pixelStride)
     }
 
     private companion object {

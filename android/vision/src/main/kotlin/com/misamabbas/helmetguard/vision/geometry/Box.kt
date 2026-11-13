@@ -28,6 +28,13 @@ data class Box(val left: Float, val top: Float, val right: Float, val bottom: Fl
         return Box((left - parent.left) / w, (top - parent.top) / h, (right - parent.left) / w, (bottom - parent.top) / h)
     }
 
+    /** Grows the box by [fraction] of its size on every side, kept inside the frame. */
+    fun expand(fraction: Float, frameWidth: Float, frameHeight: Float): Box {
+        val dx = width * fraction
+        val dy = height * fraction
+        return Box(max(0f, left - dx), max(0f, top - dy), min(frameWidth, right + dx), min(frameHeight, bottom + dy))
+    }
+
     fun touchesEdge(frameWidth: Float, frameHeight: Float, marginPx: Float = 2f): Boolean =
         left <= marginPx || top <= marginPx || right >= frameWidth - marginPx || bottom >= frameHeight - marginPx
 

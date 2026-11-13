@@ -38,9 +38,12 @@ android {
 
     buildTypes {
         debug {
-            // Lets the debug build also run on the PC's emulator.
-            ndk {
-                abiFilters += "x86_64"
+            // Build with -Pemulator to also run the debug build on the PC's x86_64 emulator.
+            // Phones don't need it, and it would add about 40 MB.
+            if (project.hasProperty("emulator")) {
+                ndk {
+                    abiFilters += "x86_64"
+                }
             }
         }
         release {
@@ -111,8 +114,6 @@ dependencies {
     implementation(libs.media3.ui)
 
     implementation(libs.onnxruntime.android)
-    implementation(libs.opencv)
-    implementation(libs.mlkit.text)
 
     implementation(platform(libs.supabase.bom))
     implementation(libs.supabase.auth)

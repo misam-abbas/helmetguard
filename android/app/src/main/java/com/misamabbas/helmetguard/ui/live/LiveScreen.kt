@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.util.Size
@@ -12,6 +13,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -38,9 +41,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -48,8 +53,6 @@ import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -64,6 +67,7 @@ import androidx.lifecycle.viewModelScope
 import com.misamabbas.helmetguard.camera.DeviceConditions
 import com.misamabbas.helmetguard.camera.FrameConverter
 import com.misamabbas.helmetguard.camera.HeatLevel
+import com.misamabbas.helmetguard.camera.MotionMonitor
 import com.misamabbas.helmetguard.data.SettingsRepository
 import com.misamabbas.helmetguard.data.db.AppDatabase
 import com.misamabbas.helmetguard.data.db.SessionEntity
@@ -72,10 +76,13 @@ import com.misamabbas.helmetguard.ml.ModelStatus
 import com.misamabbas.helmetguard.ml.ModelStore
 import com.misamabbas.helmetguard.pipeline.FrameOutput
 import com.misamabbas.helmetguard.pipeline.FrameProcessor
-import com.misamabbas.helmetguard.pipeline.OverlayKind
 import com.misamabbas.helmetguard.pipeline.PipelineConfig
 import com.misamabbas.helmetguard.pipeline.SessionContext
+import com.misamabbas.helmetguard.pipeline.StillPhoto
+import com.misamabbas.helmetguard.pipeline.TrackRecord
 import com.misamabbas.helmetguard.pipeline.ViolationRecorder
+import com.misamabbas.helmetguard.ui.components.drawDetections
+import com.misamabbas.helmetguard.ui.components.drawLabel
 import com.misamabbas.helmetguard.ui.theme.Status
 import com.misamabbas.helmetguard.vision.geometry.Box as VBox
 import com.misamabbas.helmetguard.vision.verify.RiderPolicy
@@ -112,8 +119,13 @@ class LiveViewModel @Inject constructor(
     private val recorder: ViolationRecorder,
     private val settings: SettingsRepository,
     private val conditions: DeviceConditions,
+    private val motion: MotionMonitor,
     db: AppDatabase,
 ) : ViewModel() {
+    /** Set once the camera is bound. Null on phones that cannot run all three use cases. */
+    @Volatile var imageCapture: ImageCapture? = null
+    private val stillExecutor = Executors.newSingleThreadExecutor()
+
     private val _ui = MutableStateFlow(LiveUi(modelsReady = models.status() is ModelStatus.Ready))
     val ui = _ui.asStateFlow()
     val unsynced = db.violations().observeUnsyncedCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
@@ -154,7 +166,7 @@ class LiveViewModel @Inject constructor(
                 val context = SessionContext(id, "live", status.manifest.version, policy, current.jpegQuality, isVideo = false)
                 val wallBase = System.currentTimeMillis()
                 var frameBase: Long? = null
-                val listener = recorder.listenerFor(context) { ts ->
+                val listener = recorder.listenerFor(context, onStillWanted = ::captureStill) { ts ->
                     val base = frameBase ?: ts.also { frameBase = it }
                     wallBase + (ts - base)
                 }
@@ -170,6 +182,7 @@ class LiveViewModel @Inject constructor(
                     frameCount = 0
                     startedMs = System.currentTimeMillis()
                 }
+                motion.start()
                 _ui.update { it.copy(running = true, error = null, alerts = 0) }
             }.onFailure { e ->
                 Log.e(TAG, "Could not start session", e)
@@ -190,10 +203,41 @@ class LiveViewModel @Inject constructor(
         }
         val elapsed = max(1L, System.currentTimeMillis() - startedMs)
         val frames = frameCount
+        val moved = motion.stop()
         recorder.updateSession(id) {
-            it.copy(status = SessionStatus.COMPLETED, endedAt = System.currentTimeMillis(), framesProcessed = frames, avgFps = frames * 1000f / elapsed)
+            it.copy(
+                status = SessionStatus.COMPLETED,
+                endedAt = System.currentTimeMillis(),
+                framesProcessed = frames,
+                avgFps = frames * 1000f / elapsed,
+                settingsJson = moved.mergeInto(it.settingsJson),
+            )
         }
         _ui.update { it.copy(running = false, output = null) }
+    }
+
+    /** One full-resolution photo of a confirmed bike. It is optional, so failures are only logged. */
+    private fun captureStill(record: TrackRecord) {
+        val capture = imageCapture ?: return
+        capture.takePicture(
+            stillExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    try {
+                        val buffer = image.planes[0].buffer
+                        val bytes = ByteArray(buffer.remaining())
+                        buffer.get(bytes)
+                        record.still = StillPhoto(bytes, image.width, image.height)
+                    } finally {
+                        image.close()
+                    }
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.w(TAG, "Still capture failed", exception)
+                }
+            },
+        )
     }
 
     /** Runs on the analysis thread. CameraX keeps only the newest frame, so nothing piles up. */
@@ -228,6 +272,7 @@ class LiveViewModel @Inject constructor(
 
     override fun onCleared() {
         stop()
+        stillExecutor.shutdown()
     }
 
     private companion object {
@@ -337,8 +382,17 @@ private fun CameraPreview(viewModel: LiveViewModel) {
                         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                         .build()
                         .also { it.setAnalyzer(executor, viewModel::analyze) }
+                    val still = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build()
                     provider.unbindAll()
-                    provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                    try {
+                        provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis, still)
+                        viewModel.imageCapture = still
+                    } catch (e: IllegalArgumentException) {
+                        // Some phones cannot run all three at once, and the still is the optional one.
+                        Log.w("HelmetGuard", "Running without still capture", e)
+                        viewModel.imageCapture = null
+                        provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                    }
                 }, ContextCompat.getMainExecutor(context))
             }
         },
@@ -349,6 +403,15 @@ private fun CameraPreview(viewModel: LiveViewModel) {
 private fun Overlay(ui: LiveUi, mode: DrawMode, onDrawn: (VBox) -> Unit) {
     var start by remember { mutableStateOf<Offset?>(null) }
     var end by remember { mutableStateOf<Offset?>(null) }
+
+    // Ticks every display frame during a session, so boxes glide between AI results.
+    var now by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(ui.running) {
+        while (ui.running) {
+            withFrameMillis { }
+            now = SystemClock.uptimeMillis()
+        }
+    }
 
     val gesture = if (mode == DrawMode.NONE) Modifier else Modifier.pointerInput(mode) {
         detectDragGestures(
@@ -376,44 +439,17 @@ private fun Overlay(ui: LiveUi, mode: DrawMode, onDrawn: (VBox) -> Unit) {
         }
 
         val output = ui.output ?: return@Canvas
-        val scale = min(size.width / output.frameWidth, size.height / output.frameHeight)
-        val offsetX = (size.width - output.frameWidth * scale) / 2f
-        val offsetY = (size.height - output.frameHeight * scale) / 2f
-        output.boxes.forEach { box ->
-            val color = when (box.kind) {
-                OverlayKind.HELMET -> Status.Helmet
-                OverlayKind.NO_HELMET -> Status.NoHelmet
-                OverlayKind.UNDECIDED -> Status.Undecided
-                OverlayKind.MOTORCYCLE -> Color.White
-                OverlayKind.PLATE -> Status.Plate
-            }
-            val topLeft = Offset(offsetX + box.box.left * scale, offsetY + box.box.top * scale)
-            drawRect(color, topLeft, ComposeSize(box.box.width * scale, box.box.height * scale), style = Stroke(4f))
-            drawLabel(box.label, topLeft, color)
-        }
+        drawDetections(output, glideMs = (now - output.producedAtMs).coerceIn(0L, MAX_GLIDE_MS))
     }
 }
+
+private const val MAX_GLIDE_MS = 200L
 
 private fun DrawScope.drawZone(box: VBox, color: Color, label: String) {
     val topLeft = Offset(box.left * size.width, box.top * size.height)
     drawRect(color.copy(alpha = 0.12f), topLeft, ComposeSize(box.width * size.width, box.height * size.height))
     drawRect(color, topLeft, ComposeSize(box.width * size.width, box.height * size.height), style = Stroke(3f))
     drawLabel(label, topLeft, color)
-}
-
-private fun DrawScope.drawLabel(text: String, at: Offset, color: Color) {
-    val paint = android.graphics.Paint().apply {
-        this.color = android.graphics.Color.WHITE
-        textSize = 30f
-        isAntiAlias = true
-    }
-    val background = android.graphics.Paint().apply { this.color = color.toArgb() }
-    val width = paint.measureText(text)
-    val top = (at.y - 38f).coerceAtLeast(0f)
-    drawContext.canvas.nativeCanvas.apply {
-        drawRect(at.x, top, at.x + width + 12f, top + 38f, background)
-        drawText(text, at.x + 6f, top + 29f, paint)
-    }
 }
 
 @Composable

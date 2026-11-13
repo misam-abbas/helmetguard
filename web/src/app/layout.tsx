@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { EmailLinkForwarder } from "@/components/EmailLinkForwarder";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,7 +17,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="min-h-dvh">{children}</body>
+      <body className="min-h-dvh">
+        <EmailLinkForwarder />
+        {children}
+      </body>
     </html>
   );
 }

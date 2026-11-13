@@ -3,7 +3,7 @@ package com.misamabbas.helmetguard.vision.pipeline
 import com.misamabbas.helmetguard.vision.geometry.Box
 import com.misamabbas.helmetguard.vision.verify.HeadState
 
-enum class DetailKind { RIDER, HELMET, NO_HELMET, PLATE }
+enum class DetailKind { RIDER, HELMET, NO_HELMET }
 
 data class DetailDetection(val box: Box, val kind: DetailKind, val confidence: Float)
 
@@ -14,7 +14,7 @@ data class AssociatedRider(
     val headConfidence: Float,
 )
 
-data class BikeDetails(val riders: List<AssociatedRider>, val plate: DetailDetection?)
+data class BikeDetails(val riders: List<AssociatedRider>)
 
 object Association {
     /**
@@ -46,7 +46,7 @@ object Association {
             }
         }
 
-        return BikeDetails(riders, inside.filter { it.kind == DetailKind.PLATE }.maxByOrNull { it.confidence })
+        return BikeDetails(riders)
     }
 
     private fun DetailDetection.toHeadState() = if (kind == DetailKind.HELMET) HeadState.HELMET else HeadState.NO_HELMET

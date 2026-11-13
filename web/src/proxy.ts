@@ -29,13 +29,24 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
-  const isLogin = pathname === "/login";
+  const { pathname, searchParams } = request.nextUrl;
 
-  if (!user && !isLogin) {
+  // Email links land here whether or not someone is signed in.
+  if (pathname === "/auth/confirm" || pathname === "/auth/callback") return response;
+  // If Supabase doesn't accept our link address, it sends the code to the site's home page instead.
+  if ((pathname === "/" || pathname === "/login") && searchParams.has("code")) {
+    const confirm = new URL("/auth/confirm", request.url);
+    confirm.searchParams.set("code", searchParams.get("code") ?? "");
+    return NextResponse.redirect(confirm);
+  }
+
+  // Pages for people who are not signed in yet: sign in, confirm the sign-up code, reset a password.
+  const isPublic = pathname === "/login" || pathname === "/verify" || pathname === "/forgot-password";
+
+  if (!user && !isPublic) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
-  if (user && isLogin) {
+  if (user && isPublic) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
@@ -43,5 +54,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|webp|ico)$).*)"],
+  // The detector's model and runtime files are static and already public in the repository.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|models/|ort/|.*\\.(?:svg|png|jpg|webp|ico)$).*)"],
 };

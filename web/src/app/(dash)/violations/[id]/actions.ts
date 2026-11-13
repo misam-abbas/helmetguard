@@ -23,11 +23,6 @@ export async function setReviewStatus(form: FormData) {
   await apply(String(form.get("id")), { review_status: status });
 }
 
-export async function correctPlate(form: FormData) {
-  const plate = String(form.get("plate") ?? "").toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 20);
-  await apply(String(form.get("id")), { plate_text_corrected: plate || null });
-}
-
 export async function saveNotes(form: FormData) {
   const notes = String(form.get("notes") ?? "").slice(0, 2000);
   await apply(String(form.get("id")), { review_notes: notes || null });

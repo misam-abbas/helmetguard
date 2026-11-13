@@ -13,9 +13,13 @@ out/
 *.tsbuildinfo
 next-env.d.ts
 coverage/
+# Copied in by web/scripts/copy-detect-assets.mjs before dev and build.
+web/public/ort/
+web/public/models/
 
 # Android / Gradle
 .gradle/
+.kotlin/
 **/build/
 captures/
 .externalNativeBuild/

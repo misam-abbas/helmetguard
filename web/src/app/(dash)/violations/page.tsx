@@ -36,9 +36,8 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
         <SourceSwitch path="/violations" params={params} current={filters.source} />
       </PageHeader>
 
-      <form className="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-[1.5fr_1fr_1fr_1fr_1fr_auto]">
+      <form className="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-[1fr_1fr_1fr_auto]">
         {filters.source && <input type="hidden" name="source" value={filters.source} />}
-        <input name="q" defaultValue={param(params, "q")} placeholder="Search plate, e.g. LEA12" aria-label="Search plate" className={`${inputClass} col-span-2 lg:col-span-1`} />
         <input name="from" type="date" defaultValue={param(params, "from")} aria-label="From date" className={inputClass} />
         <input name="to" type="date" defaultValue={param(params, "to")} aria-label="To date" className={inputClass} />
         <select name="review" defaultValue={param(params, "review") ?? ""} aria-label="Review status" className={inputClass}>
@@ -47,13 +46,6 @@ export default async function ViolationsPage({ searchParams }: { searchParams: P
           <option value="confirmed">Confirmed</option>
           <option value="rejected">Rejected</option>
           <option value="needs_info">Needs info</option>
-        </select>
-        <select name="ocr" defaultValue={param(params, "ocr") ?? ""} aria-label="OCR status" className={inputClass}>
-          <option value="">Any OCR status</option>
-          <option value="read">Read</option>
-          <option value="low_confidence">Needs review</option>
-          <option value="unreadable">Unreadable</option>
-          <option value="no_plate_detected">No plate</option>
         </select>
         <div className="col-span-2 flex gap-2 lg:col-span-1">
           <button type="submit" className={`${secondaryButtonClass} flex-1`}>

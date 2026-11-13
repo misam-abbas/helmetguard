@@ -17,7 +17,6 @@ const RANGES = [
   { days: 365, label: "12 months" },
 ];
 
-const OCR_LABELS: Record<string, string> = { read: "Read", low_confidence: "Needs review", unreadable: "Unreadable", no_plate_detected: "No plate" };
 const REVIEW_LABELS: Record<string, string> = { unreviewed: "Unreviewed", confirmed: "Confirmed", rejected: "Rejected", needs_info: "Needs info" };
 
 function Breakdown({ rows, labels }: { rows: { status: string; total: number }[]; labels: Record<string, string> }) {
@@ -55,15 +54,14 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const base = { p_from: from, p_to: to };
   const withSource = { ...base, p_source: source };
 
-  const [trend, location, hour, bySource, ocr, review] = await Promise.all([
+  const [trend, location, hour, bySource, review] = await Promise.all([
     supabase.rpc("violation_trend", { ...withSource, p_interval: interval }),
     supabase.rpc("compliance_by_location", withSource),
     supabase.rpc("compliance_by_hour", base),
     supabase.rpc("compliance_by_source", base),
-    supabase.rpc("ocr_breakdown", withSource),
     supabase.rpc("review_outcomes", withSource),
   ]);
-  const failed = [trend, location, hour, bySource, ocr, review].some((r) => r.error);
+  const failed = [trend, location, hour, bySource, review].some((r) => r.error);
 
   const trendData = ((trend.data ?? []) as TrendPoint[]).map((t) => ({ label: formatBucket(t.bucket, interval), live: Number(t.live), video: Number(t.video) }));
   const locations = (location.data ?? []) as { location_label: string; source: string; riders_helmet: number; riders_no_helmet: number; compliance_pct: number | null }[];
@@ -112,11 +110,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           {hours.length === 0 ? <EmptyState title="No live sessions in this period" /> : <HourChart data={hourData.map((h) => ({ ...h, compliance: h.compliance === null ? null : Number(h.compliance) }))} />}
         </Card>
 
-        <Card title="Plate readability">
-          <Breakdown rows={(ocr.data ?? []) as { status: string; total: number }[]} labels={OCR_LABELS} />
-        </Card>
-
-        <Card title="Review outcomes">
+        <Card title="Review outcomes" className="lg:col-span-2">
           <Breakdown rows={reviewRows} labels={REVIEW_LABELS} />
         </Card>
 

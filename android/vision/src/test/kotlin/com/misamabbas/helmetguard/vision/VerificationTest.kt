@@ -131,46 +131,35 @@ class VerificationTest {
         assertTrue(all.hasConfirmedRider(BikeMotion(100f, 0f)))
     }
 
-    private fun event(plate: String? = null, histogram: FloatArray? = null, box: Box = Box(100f, 100f, 300f, 400f), vx: Float = 0f) =
-        RecentEvent("v1", 0, box, vx, 0f, plate, histogram)
-
-    @Test
-    fun `merges a re-identified bike by plate allowing one character`() {
-        val dedup = Deduplicator().apply { remember(event(plate = "LEA1234")) }
-        assertEquals("v1", dedup.findDuplicate(Candidate(5000, Box(900f, 0f, 950f, 50f), "LEA1284", null)))
-    }
-
-    @Test
-    fun `different plates are different bikes even at the same spot`() {
-        val dedup = Deduplicator().apply { remember(event(plate = "LEA1234")) }
-        assertNull(dedup.findDuplicate(Candidate(500, Box(100f, 100f, 300f, 400f), "ABC987", null)))
-    }
+    private fun event(histogram: FloatArray? = null, box: Box = Box(100f, 100f, 300f, 400f), vx: Float = 0f) =
+        RecentEvent("v1", 0, box, vx, 0f, histogram)
 
     @Test
     fun `position compares against where the bike should be by now`() {
         val moving = Deduplicator().apply { remember(event(vx = 200f)) }
-        assertEquals("v1", moving.findDuplicate(Candidate(1000, Box(300f, 100f, 500f, 400f), null, null)))
+        assertEquals("v1", moving.findDuplicate(Candidate(1000, Box(300f, 100f, 500f, 400f), null)))
         // The next bike arriving where the first one was is a new event.
-        assertNull(moving.findDuplicate(Candidate(1000, Box(100f, 100f, 300f, 400f), null, null)))
+        assertNull(moving.findDuplicate(Candidate(1000, Box(100f, 100f, 300f, 400f), null)))
     }
 
     @Test
     fun `position alone stops counting after two seconds`() {
         val dedup = Deduplicator().apply { remember(event()) }
-        assertNull(dedup.findDuplicate(Candidate(5000, Box(100f, 100f, 300f, 400f), null, null)))
+        assertNull(dedup.findDuplicate(Candidate(5000, Box(100f, 100f, 300f, 400f), null)))
     }
 
     @Test
     fun `very similar colour merges, different colour does not`() {
         val histogram = floatArrayOf(0.9f, 0.1f, 0f)
         val dedup = Deduplicator().apply { remember(event(histogram = histogram)) }
-        assertEquals("v1", dedup.findDuplicate(Candidate(4000, Box(0f, 0f, 10f, 10f), null, floatArrayOf(0.88f, 0.12f, 0f))))
-        assertNull(dedup.findDuplicate(Candidate(4000, Box(0f, 0f, 10f, 10f), null, floatArrayOf(0f, 0.1f, 0.9f))))
+        assertEquals("v1", dedup.findDuplicate(Candidate(4000, Box(0f, 0f, 10f, 10f), floatArrayOf(0.88f, 0.12f, 0f))))
+        assertNull(dedup.findDuplicate(Candidate(4000, Box(0f, 0f, 10f, 10f), floatArrayOf(0f, 0.1f, 0.9f))))
     }
 
     @Test
     fun `forgets events after ten seconds`() {
-        val dedup = Deduplicator().apply { remember(event(plate = "LEA1234")) }
-        assertNull(dedup.findDuplicate(Candidate(10_001, Box(0f, 0f, 10f, 10f), "LEA1234", null)))
+        val histogram = floatArrayOf(0.9f, 0.1f, 0f)
+        val dedup = Deduplicator().apply { remember(event(histogram = histogram)) }
+        assertNull(dedup.findDuplicate(Candidate(10_001, Box(100f, 100f, 300f, 400f), histogram)))
     }
 }

@@ -41,10 +41,12 @@ import com.misamabbas.helmetguard.data.db.SourceTotals
 import com.misamabbas.helmetguard.ui.components.SourceSwitch
 import com.misamabbas.helmetguard.ui.components.StatCard
 import com.misamabbas.helmetguard.ui.components.compliancePercent
+import com.misamabbas.helmetguard.video.VideoAnalysisManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -53,7 +55,15 @@ import javax.inject.Inject
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
-class HomeViewModel @Inject constructor(private val settings: SettingsRepository, db: AppDatabase) : ViewModel() {
+class HomeViewModel @Inject constructor(
+    private val settings: SettingsRepository,
+    db: AppDatabase,
+    analysis: VideoAnalysisManager,
+) : ViewModel() {
+    /** Unfinished analysis in the background, so the user can get back to it. */
+    val runningAnalysis = analysis.ui.map { state -> state.sessionId?.takeIf { !state.finished && analysis.isRunning } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     private val startOfToday = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     val source = settings.sourceFilter.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SourceFilter.ALL)
@@ -77,8 +87,10 @@ fun HomeScreen(
     onSettings: () -> Unit,
     onDiagnostics: () -> Unit,
     onSync: () -> Unit,
+    onOpenAnalysis: (String) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
+    val runningAnalysis by viewModel.runningAnalysis.collectAsStateWithLifecycle()
     val source by viewModel.source.collectAsStateWithLifecycle()
     val totals by viewModel.totals.collectAsStateWithLifecycle()
     val alerts by viewModel.alerts.collectAsStateWithLifecycle()
@@ -94,6 +106,11 @@ fun HomeScreen(
             },
         )
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            runningAnalysis?.let { id ->
+                OutlinedCard(Modifier.fillMaxWidth().clickable { onOpenAnalysis(id) }) {
+                    Text("A video is being analysed. Tap to view progress.", Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
             SourceSwitch(source, viewModel::select)
             Text("Today", style = MaterialTheme.typography.titleSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

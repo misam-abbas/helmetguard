@@ -139,6 +139,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
         SliderRow("Remove synced full images after (days)", s.localCleanupDays.toString(), s.localCleanupDays.toFloat(), 1f..30f, 28) { v -> viewModel.update { it.copy(localCleanupDays = v.roundToInt()) } }
 
         ToggleRow("Upload on Wi-Fi only", s.wifiOnly) { v -> viewModel.update { it.copy(wifiOnly = v) } }
+        ToggleRow("Ask for fingerprint or PIN to open evidence", s.evidenceLock) { v -> viewModel.update { it.copy(evidenceLock = v) } }
 
         OutlinedButton({
             scope.launch { signOutBlocked = !auth.signOut() }
@@ -240,6 +241,6 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
             style = MaterialTheme.typography.bodySmall,
         )
         Text("Licences", style = MaterialTheme.typography.titleSmall)
-        Text("HelmetGuard is open source under AGPL-3.0. Uses ONNX Runtime (MIT), OpenCV (Apache-2.0), Google ML Kit (Google terms), Jetpack libraries (Apache-2.0) and supabase-kt (MIT).", style = MaterialTheme.typography.bodySmall)
+        Text("HelmetGuard is open source under AGPL-3.0. Uses ONNX Runtime (MIT), Jetpack libraries (Apache-2.0) and supabase-kt (MIT). Models trained with Ultralytics YOLO (AGPL-3.0) on the dataset helmet-detection-and-license-plate-recognition by on Gia Capital (CC BY 4.0, Roboflow Universe).", style = MaterialTheme.typography.bodySmall)
     }
 }

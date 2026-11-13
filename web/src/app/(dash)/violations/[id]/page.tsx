@@ -3,13 +3,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SubmitButton } from "@/components/SubmitButton";
-import { Card, inputClass, Notice, OcrBadge, ReviewBadge, SourceTag } from "@/components/ui";
+import { Card, Notice, ReviewBadge, SourceTag } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { signPaths } from "@/lib/evidence";
 import { param, type SearchParams } from "@/lib/filters";
 import { formatClipTime, formatConfidence, formatDateTime } from "@/lib/format";
 import type { Box, Evidence, ReviewEvent, Rider, Violation } from "@/lib/types";
-import { correctPlate, saveNotes, setReviewStatus } from "./actions";
+import { saveNotes, setReviewStatus } from "./actions";
 
 export const metadata: Metadata = { title: "Violation" };
 
@@ -94,9 +94,8 @@ export default async function ViolationPage({ params, searchParams }: { params: 
       </Link>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h1 className="plate text-xl font-semibold">{violation.plate_text_final ?? "Plate not read"}</h1>
+        <h1 className="text-xl font-semibold">Rider without helmet</h1>
         <ReviewBadge status={violation.review_status} />
-        <OcrBadge status={violation.plate_ocr_status} />
         <SourceTag source={violation.source} />
       </div>
 
@@ -125,13 +124,10 @@ export default async function ViolationPage({ params, searchParams }: { params: 
 
           <Card title="Evidence photos">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Photo url={urlOf(first("motorcycle"))} alt="Motorcycle" />
+              <Photo url={urlOf(first("motorcycle"))} alt="Whole bike" />
               {all("rider").map((e, i) => (
                 <Photo key={e.id} url={urlOf(e)} alt={`Rider ${i + 1}`} />
               ))}
-              <Photo url={urlOf(first("plate"))} alt="Plate (original)" />
-              <Photo url={urlOf(first("plate_enhanced"))} alt="Plate (enhanced)" note="Edited copy used for OCR" />
-              <Photo url={urlOf(first("plate_source_frame"))} alt="Frame the plate came from" />
               <Photo url={urlOf(first("alt_frame"))} alt="Second-best frame" />
               <Photo url={urlOf(first("still_hires"))} alt="Full-resolution still" />
             </div>
@@ -152,26 +148,6 @@ export default async function ViolationPage({ params, searchParams }: { params: 
               <SubmitButton name="status" value="needs_info" variant="secondary">
                 <CircleHelp className="size-4" aria-hidden /> Needs info
               </SubmitButton>
-            </form>
-          </Card>
-
-          <Card title="Number plate">
-            <dl className="mb-3 divide-y divide-line">
-              <Fact label="OCR text">
-                <span className="plate">{violation.plate_text_ocr ?? "None stored"}</span>
-              </Fact>
-              <Fact label="OCR confidence">{formatConfidence(violation.plate_ocr_confidence)}</Fact>
-              <Fact label="Engine">{violation.ocr_engine ?? "—"}</Fact>
-            </dl>
-            {violation.plate_candidates?.length > 0 && (
-              <p className="mb-3 text-xs text-ink-3">
-                Alternatives: <span className="plate">{violation.plate_candidates.map((c) => `${c.text} (${formatConfidence(c.confidence)})`).join(", ")}</span>
-              </p>
-            )}
-            <form action={correctPlate} className="flex gap-2">
-              <input type="hidden" name="id" value={violation.id} />
-              <input name="plate" defaultValue={violation.plate_text_corrected ?? ""} maxLength={20} placeholder="Correct plate" aria-label="Corrected plate" className={`${inputClass} plate uppercase`} />
-              <SubmitButton variant="secondary">Save</SubmitButton>
             </form>
           </Card>
 

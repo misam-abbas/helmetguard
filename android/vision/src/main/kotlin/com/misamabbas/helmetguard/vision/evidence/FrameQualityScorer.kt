@@ -8,10 +8,9 @@ data class FrameQualityInput(
     val motorcycle: Box,
     val frameWidth: Float,
     val frameHeight: Float,
-    /** Variance of the Laplacian of the crop, from OpenCV. */
+    /** Variance of the Laplacian of the crop, from ImageMetrics. */
     val sharpness: Double,
     val confidence: Float,
-    val plateVisible: Boolean,
     /** Largest overlap (IoU) with any other motorcycle in the frame. */
     val overlapWithOther: Float,
 )
@@ -22,14 +21,16 @@ object FrameQualityScorer {
     private const val EDGE_PENALTY = 0.25f
     private const val OVERLAP_PENALTY = 0.30f
 
-    /** Higher is better. Weights come from section 5 of the plan. */
+    /**
+     * Higher is better. Weights come from section 5 of the plan, without its 0.20 for a
+     * visible plate: number plates are not detected, so frames are ranked on the rest.
+     */
     fun score(input: FrameQualityInput): Float {
         val share = input.motorcycle.area / max(1f, input.frameWidth * input.frameHeight)
         val size = min(1f, share / FULL_SIZE_SHARE)
         val sharp = min(1.0, input.sharpness / FULL_SHARPNESS).toFloat()
-        val plate = if (input.plateVisible) 1f else 0f
 
-        var score = 0.35f * size + 0.25f * sharp + 0.20f * input.confidence + 0.20f * plate
+        var score = 0.35f * size + 0.25f * sharp + 0.20f * input.confidence
         if (input.motorcycle.touchesEdge(input.frameWidth, input.frameHeight)) score -= EDGE_PENALTY
         score -= OVERLAP_PENALTY * input.overlapWithOther
         return score

@@ -103,19 +103,6 @@ fun SyncBadge(state: String) = when (state) {
 }
 
 @Composable
-fun PlateText(text: String?, status: String) {
-    if (text != null) {
-        Text(text, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
-    } else {
-        Text(
-            if (status == "no_plate_detected") "No plate seen" else "Unreadable",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
 fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
     OutlinedCard(modifier) {
         Column(Modifier.padding(12.dp)) {
