@@ -1,6 +1,6 @@
 import { Check, CircleHelp, Clock3, Eye, X } from "lucide-react";
 import Link from "next/link";
-import type { OcrStatus, ReviewStatus, Source } from "@/lib/types";
+import type { ReviewStatus, Source } from "@/lib/types";
 
 export function cn(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -79,21 +79,6 @@ export function ReviewBadge({ status }: { status: ReviewStatus }) {
         </span>
       );
   }
-}
-
-const OCR_LABEL: Record<OcrStatus, string> = {
-  read: "Read",
-  low_confidence: "Needs review",
-  unreadable: "Unreadable",
-  no_plate_detected: "No plate",
-};
-
-export function OcrBadge({ status }: { status: OcrStatus }) {
-  return (
-    <span className={cn(pill, status === "read" ? "bg-good-bg text-good" : status === "low_confidence" ? "bg-warn-bg text-warn" : "bg-surface-2 text-ink-2")}>
-      {OCR_LABEL[status]}
-    </span>
-  );
 }
 
 export function PendingPill({ children }: { children: React.ReactNode }) {

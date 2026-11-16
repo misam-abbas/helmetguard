@@ -2,6 +2,12 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_KEY, SUPABASE_URL, supabaseConfigured } from "@/lib/supabase/env";
 
+// Pages for people who are not signed in yet: sign in, confirm an email, reset a password.
+// A signed-in person is sent on to the dashboard instead.
+const SIGNED_OUT_PAGES = new Set(["/login", "/verify", "/forgot-password"]);
+// Pages anyone may read, signed in or not.
+const OPEN_PAGES = new Set(["/privacy", "/auth/confirm", "/auth/callback"]);
+
 // Layer one of three: refreshes the session and sends signed-out visitors to /login.
 // Server pages then re-check the role, and Postgres RLS decides what comes back.
 export async function proxy(request: NextRequest) {
@@ -31,22 +37,25 @@ export async function proxy(request: NextRequest) {
 
   const { pathname, searchParams } = request.nextUrl;
 
-  // Email links land here whether or not someone is signed in.
-  if (pathname === "/auth/confirm" || pathname === "/auth/callback") return response;
-  // If Supabase doesn't accept our link address, it sends the code to the site's home page instead.
-  if ((pathname === "/" || pathname === "/login") && searchParams.has("code")) {
-    const confirm = new URL("/auth/confirm", request.url);
-    confirm.searchParams.set("code", searchParams.get("code") ?? "");
-    return NextResponse.redirect(confirm);
+  if (OPEN_PAGES.has(pathname)) return response;
+  if (pathname === "/" || pathname === "/login") {
+    // If Supabase doesn't accept a link's address, it sends the person to the site's home page instead.
+    if (searchParams.has("code") || searchParams.has("token_hash")) {
+      const confirm = new URL("/auth/confirm", request.url);
+      confirm.search = searchParams.toString();
+      return NextResponse.redirect(confirm);
+    }
+    // An expired or already-used email link.
+    if (searchParams.has("error_description") || searchParams.has("error_code")) {
+      return NextResponse.redirect(new URL("/login?error=link", request.url));
+    }
   }
 
-  // Pages for people who are not signed in yet: sign in, confirm the sign-up code, reset a password.
-  const isPublic = pathname === "/login" || pathname === "/verify" || pathname === "/forgot-password";
-
-  if (!user && !isPublic) {
+  const signedOutPage = SIGNED_OUT_PAGES.has(pathname);
+  if (!user && !signedOutPage) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
-  if (user && isPublic) {
+  if (user && signedOutPage) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

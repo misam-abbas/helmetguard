@@ -1,7 +1,6 @@
 import { ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Privacy and data notice" };
@@ -42,14 +41,14 @@ const SECTIONS = [
   },
 ];
 
+// Open to everyone, so people can read it before they create an account.
 export default async function PrivacyPage() {
   const current = await getCurrentUser();
-  if (!current) redirect("/login");
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-8">
-      <Link href="/dashboard" className="mb-5 inline-flex items-center gap-1.5 text-sm text-ink-2 hover:text-ink">
-        <ArrowLeft className="size-4" aria-hidden /> Back
+      <Link href={current ? "/dashboard" : "/login"} className="mb-5 inline-flex items-center gap-1.5 text-sm text-ink-2 hover:text-ink">
+        <ArrowLeft className="size-4" aria-hidden /> {current ? "Back to the dashboard" : "Back to sign in"}
       </Link>
       <h1 className="text-xl font-semibold tracking-tight">Privacy and data notice</h1>
       <p className="mt-1 text-sm text-ink-2">HelmetGuard is an academic prototype. This is how it treats the people it records.</p>

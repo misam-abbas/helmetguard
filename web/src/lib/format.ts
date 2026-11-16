@@ -49,8 +49,3 @@ export function compliance(helmet: number, noHelmet: number): number | null {
   const total = helmet + noHelmet;
   return total === 0 ? null : (100 * helmet) / total;
 }
-
-export function plateLabel(text: string | null, status: string): string {
-  if (text) return text;
-  return status === "no_plate_detected" ? "No plate seen" : "Unreadable";
-}

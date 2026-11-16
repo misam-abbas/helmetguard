@@ -2,7 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { forgetEmail, pendingEmail, rememberEmail } from "@/lib/pending-email";
-import { confirmLink } from "@/lib/site-url";
+import { emailLink } from "@/lib/site-url";
+import { authErrorKey, createEmailClient } from "@/lib/supabase/email";
 import { createClient } from "@/lib/supabase/server";
 
 const MIN_PASSWORD = 8;
@@ -16,12 +17,18 @@ function code(form: FormData) {
 }
 
 export async function signIn(form: FormData) {
+  const email = field(form, "email");
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({
-    email: field(form, "email"),
-    password: String(form.get("password") ?? ""),
-  });
-  if (error) redirect(error.code === "email_not_confirmed" ? "/login?error=unconfirmed" : "/login?error=credentials");
+  const { error } = await supabase.auth.signInWithPassword({ email, password: String(form.get("password") ?? "") });
+  if (error) {
+    if (error.code === "email_not_confirmed") {
+      // Let them confirm from here, or ask for a new email, without starting again.
+      await rememberEmail(email);
+      redirect("/verify?error=unconfirmed");
+    }
+    const key = authErrorKey(error, "credentials");
+    redirect(`/login?error=${key === "rate" ? "wait" : key}`);
+  }
   redirect("/dashboard");
 }
 
@@ -30,19 +37,22 @@ export async function signUp(form: FormData) {
   if (password.length < MIN_PASSWORD) redirect("/login?mode=signup&error=short");
 
   const email = field(form, "email");
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({
+  const { data, error } = await createEmailClient().auth.signUp({
     email,
     password,
     options: {
       data: { full_name: field(form, "full_name").slice(0, 120) },
-      // The email has a code, and a link for anyone who prefers to click.
-      emailRedirectTo: await confirmLink("/pending"),
+      // The email's link confirms the address in any browser, then lands on /pending.
+      emailRedirectTo: await emailLink(),
     },
   });
-  if (error) redirect("/login?mode=signup&error=signup");
-  // With email confirmation off in Supabase there is a session already; otherwise a code was emailed.
-  if (data.session) redirect("/pending");
+  if (error) redirect(`/login?mode=signup&error=${authErrorKey(error, "signup")}`);
+  if (data.session) {
+    // Email confirmation is off in Supabase, so the account is signed in already.
+    const supabase = await createClient();
+    await supabase.auth.setSession(data.session);
+    redirect("/pending");
+  }
   await rememberEmail(email);
   redirect("/verify");
 }
@@ -61,18 +71,16 @@ export async function verifySignup(form: FormData) {
 export async function resendSignupCode() {
   const email = await pendingEmail();
   if (!email) redirect("/login?mode=signup&error=expired");
-  const supabase = await createClient();
-  const { error } = await supabase.auth.resend({ type: "signup", email, options: { emailRedirectTo: await confirmLink("/pending") } });
-  redirect(error ? "/verify?error=send" : "/verify?sent=1");
+  const { error } = await createEmailClient().auth.resend({ type: "signup", email, options: { emailRedirectTo: await emailLink() } });
+  redirect(error ? `/verify?error=${authErrorKey(error, "send")}` : "/verify?sent=1");
 }
 
 export async function requestPasswordReset(form: FormData) {
   const email = field(form, "email");
   if (!email) redirect("/forgot-password?error=email");
-  const supabase = await createClient();
   // Supabase answers the same whether or not the address has an account.
-  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: await confirmLink("/reset-password") });
-  if (error) redirect("/forgot-password?error=send");
+  const { error } = await createEmailClient().auth.resetPasswordForEmail(email, { redirectTo: await emailLink() });
+  if (error) redirect(`/forgot-password?error=${authErrorKey(error, "send")}`);
   await rememberEmail(email);
   redirect("/forgot-password?step=code");
 }
@@ -90,7 +98,7 @@ export async function resetPassword(form: FormData) {
   if (updateError) {
     // The code signed them in and is now used up, so sign out and let them start again.
     await supabase.auth.signOut();
-    redirect("/forgot-password?error=update");
+    redirect(`/forgot-password?error=${authErrorKey(updateError, "update")}`);
   }
   await forgetEmail();
   redirect("/dashboard");
@@ -102,9 +110,9 @@ export async function setNewPassword(form: FormData) {
   if (password.length < MIN_PASSWORD) redirect("/reset-password?error=short");
   const supabase = await createClient();
   const { error } = await supabase.auth.updateUser({ password });
-  if (error) redirect("/reset-password?error=update");
+  if (error) redirect(`/reset-password?error=${authErrorKey(error, "update")}`);
   await forgetEmail();
-  redirect("/dashboard");
+  redirect("/dashboard?notice=password");
 }
 
 export async function signOut() {

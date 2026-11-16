@@ -17,7 +17,12 @@ export async function siteOrigin(): Promise<string> {
   return `${proto}://${host}`;
 }
 
-/** Where an email link lands, then sends the person on to `next`. */
-export async function confirmLink(next: "/pending" | "/reset-password"): Promise<string> {
-  return `${await siteOrigin()}/auth/confirm?next=${encodeURIComponent(next)}`;
+/**
+ * Where a sign-up or password-reset email link lands. The page reads the session from the
+ * link and sends the person on: to /reset-password for a reset, otherwise to /pending.
+ * The address must match Supabase's Redirect URLs list; if it doesn't, Supabase sends the
+ * link to its Site URL instead, and EmailLinkForwarder passes it on from there.
+ */
+export async function emailLink(): Promise<string> {
+  return `${await siteOrigin()}/auth/callback`;
 }

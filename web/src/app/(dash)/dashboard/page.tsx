@@ -5,7 +5,7 @@ import { Card, EmptyState, Notice, PageHeader, TextLink } from "@/components/ui"
 import { VIOLATION_ROW_COLUMNS, ViolationRows, type ViolationRow } from "@/components/ViolationRows";
 import { requireStaff } from "@/lib/auth";
 import { thumbnailsFor } from "@/lib/evidence";
-import { buildHref, parseSource, rangeFromDays, type SearchParams } from "@/lib/filters";
+import { buildHref, param, parseSource, rangeFromDays, type SearchParams } from "@/lib/filters";
 import { formatBucket, formatNumber, formatPercent } from "@/lib/format";
 import type { DashboardSummary, TrendPoint } from "@/lib/types";
 
@@ -56,6 +56,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <SourceSwitch path="/dashboard" params={params} current={source} />
       </PageHeader>
 
+      {param(params, "notice") === "password" && <Notice>Your password was changed. Use the new one next time you sign in.</Notice>}
       {failed && <Notice tone="bad">Some numbers could not be loaded. Refresh to try again.</Notice>}
       {storageUsed >= 0.8 && (
         <Notice tone="warn">

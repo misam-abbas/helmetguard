@@ -107,8 +107,9 @@ class AuthRepository @Inject constructor(
     }
 
     /**
-     * With email confirmation on in Supabase, no session comes back: a 6-digit code is
-     * emailed, and the account only exists for an admin to approve once that code is entered.
+     * With email confirmation on in Supabase, no session comes back: an email with a link
+     * (and, with a custom email template, a code) is sent, and the account only goes to an
+     * admin for approval once the address is confirmed.
      */
     suspend fun signUp(name: String, email: String, password: String): Result<SignUpResult> = runCatching {
         // If the email carries a link as well as the code, the link opens the website.
@@ -126,7 +127,7 @@ class AuthRepository @Inject constructor(
     }
 
     suspend fun resendSignUpCode(email: String): Result<Unit> = runCatching {
-        requireNotNull(client).auth.resendEmail(type = OtpType.Email.SIGNUP, email = email.trim())
+        requireNotNull(client).auth.resendEmail(type = OtpType.Email.SIGNUP, email = email.trim(), redirectUrl = WEB_EMAIL_LINK)
     }
 
     /**

@@ -1,26 +1,34 @@
 import { Shield } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { PasswordInput } from "@/components/PasswordInput";
 import { SubmitButton } from "@/components/SubmitButton";
 import { inputClass, Notice } from "@/components/ui";
 import { param, type SearchParams } from "@/lib/filters";
+import { AUTH_MESSAGES } from "@/lib/supabase/email";
 import { signIn, signUp } from "./actions";
 
 export const metadata: Metadata = { title: "Sign in" };
 
 const ERRORS: Record<string, string> = {
+  ...AUTH_MESSAGES,
   credentials: "That email and password do not match an account.",
-  unconfirmed: "Confirm your email first. Create the account again to get a new code.",
   short: "Use a password of at least 8 characters.",
-  signup: "That account could not be created. It may already exist.",
+  signup: "That account could not be created. Check the details and try again.",
+  send: "The confirmation email could not be sent. Try again in a few minutes.",
   expired: "That sign-up took too long. Start again.",
-  link: "That email link has expired or was already used, or it was opened in a different browser. Ask for a new one, or use the code from the email.",
+  link: "That email link has expired or was already used. If you already confirmed your email, just sign in. Otherwise ask for a new email.",
+};
+
+const NOTICES: Record<string, string> = {
+  confirmed: "Your email address is confirmed. Sign in to continue.",
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams;
   const signup = param(params, "mode") === "signup";
   const error = ERRORS[param(params, "error") ?? ""];
+  const notice = NOTICES[param(params, "notice") ?? ""];
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-4 py-10">
@@ -30,26 +38,30 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </div>
         <h1 className="text-xl font-semibold tracking-tight">{signup ? "Create an account" : "Sign in to review alerts"}</h1>
         <p className="mb-5 mt-1 text-sm text-ink-2">
-          {signup ? "We will email you a code to confirm your address. Then an admin approves your account." : "For approved reviewers and administrators."}
+          {signup ? "We will email you a link to confirm your address. Then an admin approves your account." : "For approved reviewers and administrators."}
         </p>
 
         {error && <Notice tone="bad">{error}</Notice>}
+        {notice && !error && <Notice>{notice}</Notice>}
 
         <form action={signup ? signUp : signIn} className="space-y-3">
           {signup && (
             <label className="block text-sm font-medium">
               Full name
-              <input name="full_name" required autoComplete="name" className={`${inputClass} mt-1`} />
+              <input name="full_name" required autoComplete="name" maxLength={120} className={`${inputClass} mt-1`} />
             </label>
           )}
           <label className="block text-sm font-medium">
             Email
-            <input name="email" type="email" required autoComplete="email" className={`${inputClass} mt-1`} />
+            <input name="email" type="email" required autoComplete="email" autoCapitalize="none" spellCheck={false} className={`${inputClass} mt-1`} />
           </label>
-          <label className="block text-sm font-medium">
-            Password
-            <input name="password" type="password" required minLength={signup ? 8 : undefined} autoComplete={signup ? "new-password" : "current-password"} className={`${inputClass} mt-1`} />
-          </label>
+          <PasswordInput
+            id="password"
+            label="Password"
+            autoComplete={signup ? "new-password" : "current-password"}
+            minLength={signup ? 8 : undefined}
+            hint={signup ? "At least 8 characters." : undefined}
+          />
           <SubmitButton className="w-full">{signup ? "Create account" : "Sign in"}</SubmitButton>
         </form>
 
@@ -65,6 +77,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           {signup ? "Already have an account? " : "New here? "}
           <Link href={signup ? "/login" : "/login?mode=signup"} className="font-medium text-ink underline underline-offset-2">
             {signup ? "Sign in" : "Create an account"}
+          </Link>
+        </p>
+        <p className="mt-6 text-xs text-ink-3">
+          <Link href="/privacy" className="underline underline-offset-2">
+            Privacy notice
           </Link>
         </p>
       </div>

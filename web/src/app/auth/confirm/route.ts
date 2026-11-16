@@ -2,9 +2,10 @@ import type { EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-// Supabase emails can carry a link as well as a code. This is where the link lands.
-// Two kinds exist: a token hash (from a custom email template, works in any browser)
-// and a one-time code (from the default template, works in the browser that asked).
+// Email links in two other formats land here; most land on /auth/callback instead.
+// A token hash comes from a custom email template and works in any browser. A one-time
+// code comes from links asked for by older versions of this site, and only works in
+// the browser that asked; by the time Supabase hands one out, a sign-up is already confirmed.
 
 const NEXT_PAGES = new Set(["/pending", "/reset-password", "/dashboard"]);
 const OTP_TYPES = new Set<string>(["signup", "email", "recovery", "invite", "magiclink", "email_change"]);
@@ -15,6 +16,8 @@ export async function GET(request: NextRequest) {
   const tokenHash = params.get("token_hash");
   const type = params.get("type");
   const code = params.get("code");
+  const asked = params.get("next");
+  const forReset = type === "recovery" || asked === "/reset-password";
   const supabase = await createClient();
 
   let confirmed = false;
@@ -25,10 +28,16 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     confirmed = !error;
   }
-  if (!confirmed) return NextResponse.redirect(new URL("/login?error=link", request.url));
+  if (!confirmed) {
+    let failed = forReset ? "/forgot-password?error=link" : "/login?error=link";
+    // Supabase only hands out a code after it has checked the link, so a sign-up is confirmed even
+    // when this browser can't finish signing in (for example, the link was opened on a phone).
+    if (code && !forReset && asked === "/pending") failed = "/login?notice=confirmed";
+    return NextResponse.redirect(new URL(failed, request.url));
+  }
 
-  let next = params.get("next");
-  if (!next || !NEXT_PAGES.has(next)) {
+  let next = asked && NEXT_PAGES.has(asked) ? asked : null;
+  if (!next) {
     if (type === "recovery") {
       next = "/reset-password";
     } else {

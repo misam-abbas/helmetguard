@@ -2,15 +2,18 @@ import { KeyRound } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { PasswordInput } from "@/components/PasswordInput";
 import { SubmitButton } from "@/components/SubmitButton";
-import { inputClass, Notice } from "@/components/ui";
+import { Notice } from "@/components/ui";
 import { param, type SearchParams } from "@/lib/filters";
+import { AUTH_MESSAGES } from "@/lib/supabase/email";
 import { createClient } from "@/lib/supabase/server";
 import { setNewPassword } from "../login/actions";
 
 export const metadata: Metadata = { title: "Choose a new password" };
 
 const ERRORS: Record<string, string> = {
+  ...AUTH_MESSAGES,
   short: "Use a password of at least 8 characters.",
   update: "Your new password could not be saved. Try a different one.",
 };
@@ -21,7 +24,7 @@ export default async function ResetPasswordPage({ searchParams }: { searchParams
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/login?error=link");
+  if (!user) redirect("/forgot-password?error=link");
   const params = await searchParams;
   const error = ERRORS[param(params, "error") ?? ""];
 
@@ -31,16 +34,13 @@ export default async function ResetPasswordPage({ searchParams }: { searchParams
         <KeyRound className="mb-3 size-6 text-ink-2" aria-hidden />
         <h1 className="text-xl font-semibold tracking-tight">Choose a new password</h1>
         <p className="mb-5 mt-1 text-sm text-ink-2">
-          For <span className="font-medium text-ink">{user.email}</span>. Use it next time you sign in, on the website and in the app.
+          For <span className="break-all font-medium text-ink">{user.email}</span>. Use it next time you sign in, on the website and in the app.
         </p>
 
         {error && <Notice tone="bad">{error}</Notice>}
 
         <form action={setNewPassword} className="space-y-3">
-          <label className="block text-sm font-medium">
-            New password
-            <input name="password" type="password" required minLength={8} autoComplete="new-password" className={`${inputClass} mt-1`} />
-          </label>
+          <PasswordInput id="new-password" label="New password" autoComplete="new-password" minLength={8} hint="At least 8 characters." />
           <SubmitButton className="w-full">Save new password</SubmitButton>
         </form>
 

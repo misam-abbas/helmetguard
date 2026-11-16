@@ -60,6 +60,8 @@ import com.misamabbas.helmetguard.data.StartupCleanup
 import com.misamabbas.helmetguard.data.db.AppDatabase
 import com.misamabbas.helmetguard.sync.SyncScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.jan.supabase.auth.exception.AuthErrorCode
+import io.github.jan.supabase.auth.exception.AuthRestException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -107,7 +109,16 @@ class AuthViewModel @Inject constructor(
         info.value = null
     }
 
-    fun signIn(email: String, password: String) = attempt(SIGN_IN_FAILED) {
+    fun signIn(email: String, password: String) = attempt(SIGN_IN_FAILED, onFailure = { failure ->
+        // An account whose email isn't confirmed yet goes to the confirm screen, where a new email is one tap away.
+        if (failure.authCode() == AuthErrorCode.EmailNotConfirmed) {
+            pendingEmail.value = email.trim()
+            mode.value = AuthMode.VERIFY
+            "Confirm your email first: open the link we sent to ${email.trim()}, or send a new email below."
+        } else {
+            null
+        }
+    }) {
         auth.signIn(email, password).map { _state.value = it }
     }
 
@@ -118,7 +129,7 @@ class AuthViewModel @Inject constructor(
                 SignUpResult.CodeSent -> {
                     pendingEmail.value = email.trim()
                     mode.value = AuthMode.VERIFY
-                    info.value = "We emailed a code to ${email.trim()}. Enter it below to confirm your email."
+                    info.value = "We emailed ${email.trim()}. Open the link in it to confirm your address. It can take a minute, and may land in spam."
                 }
             }
         }
@@ -128,15 +139,17 @@ class AuthViewModel @Inject constructor(
         auth.verifySignUpCode(pendingEmail.value, code).map { _state.value = it }
     }
 
-    fun resendCode() = attempt("Could not send a new code. Wait a minute, then try again.") {
-        auth.resendSignUpCode(pendingEmail.value).map { info.value = "A new code is on its way to ${pendingEmail.value}." }
+    fun resendCode() = attempt("Could not send a new email. Wait a minute, then try again.") {
+        auth.resendSignUpCode(pendingEmail.value).map {
+            info.value = "A new email is on its way to ${pendingEmail.value}. It can take a minute, and may land in spam."
+        }
     }
 
-    fun sendReset(email: String) = attempt("Could not send the code. Check your internet connection, wait a minute, then try again.") {
+    fun sendReset(email: String) = attempt("Could not send the email. Check your internet connection, wait a minute, then try again.") {
         auth.sendPasswordReset(email).map {
             pendingEmail.value = email.trim()
             mode.value = AuthMode.RESET
-            info.value = "If ${email.trim()} has an account, a code is on its way. Enter it with your new password."
+            info.value = "If ${email.trim()} has an account, an email is on its way. It can take a minute, and may land in spam."
         }
     }
 
@@ -144,13 +157,14 @@ class AuthViewModel @Inject constructor(
         auth.resetPassword(pendingEmail.value, code, newPassword).map { _state.value = it }
     }
 
-    private fun attempt(failure: String, block: suspend () -> Result<Unit>) {
+    /** Runs [block]; on failure shows what [onFailure] says, a message for the server's reason, or [fallback]. */
+    private fun attempt(fallback: String, onFailure: (Throwable) -> String? = { null }, block: suspend () -> Result<Unit>) {
         viewModelScope.launch {
             busy.value = true
             error.value = null
-            block().onFailure {
+            block().onFailure { failure ->
                 info.value = null
-                error.value = failure
+                error.value = onFailure(failure) ?: messageFor(failure) ?: fallback
             }
             busy.value = false
         }
@@ -166,10 +180,27 @@ class AuthViewModel @Inject constructor(
     }
 
     private companion object {
-        const val SIGN_IN_FAILED = "That did not work. Check your email, password and internet connection. If you just created this account, confirm your email first."
+        const val SIGN_IN_FAILED = "That did not work. Check your email, password and internet connection."
         const val SIGN_UP_FAILED = "Could not create the account. Check the details and your internet connection."
-        const val CODE_FAILED = "That code is wrong or has expired. Check the email, or ask for a new code."
+        const val CODE_FAILED = "That code is wrong or has expired. Check the email, or ask for a new one."
     }
+}
+
+private fun Throwable.authCode(): AuthErrorCode? = (this as? AuthRestException)?.errorCode
+
+/** A plain-language message for the reasons Supabase gives, or null to use the screen's own message. */
+private fun messageFor(failure: Throwable): String? = when (failure.authCode()) {
+    AuthErrorCode.InvalidCredentials -> "That email and password do not match an account."
+    AuthErrorCode.OverEmailSendRateLimit -> "Too many emails have been sent recently, so this one wasn't. Try again later."
+    AuthErrorCode.OverRequestRateLimit -> "Too many attempts. Wait a minute, then try again."
+    AuthErrorCode.EmailAddressNotAuthorized -> "HelmetGuard can't send email to that address yet. Ask the admin."
+    AuthErrorCode.EmailAddressInvalid, AuthErrorCode.ValidationFailed -> "Enter a valid email address."
+    AuthErrorCode.WeakPassword -> "Choose a stronger password: at least 8 characters, and not a common one."
+    AuthErrorCode.UserAlreadyExists, AuthErrorCode.EmailExists -> "An account with that email already exists. Sign in, or use \"Forgot password?\"."
+    AuthErrorCode.SignupDisabled -> "New accounts are turned off. Ask the HelmetGuard admin."
+    AuthErrorCode.SamePassword -> "Choose a password different from your current one."
+    AuthErrorCode.OtpExpired -> "That code has expired. Ask for a new email."
+    else -> null
 }
 
 @Composable
@@ -225,10 +256,18 @@ fun SignInScreen(viewModel: AuthViewModel = hiltViewModel()) {
 
     val (title, subtitle, action) = when (mode) {
         AuthMode.SIGN_IN -> Triple("Sign in to HelmetGuard", "You only need internet the first time. After that the app works offline.", "Sign in")
-        AuthMode.SIGN_UP -> Triple("Create your account", "We will email you a code to confirm your address. Then an admin approves your account.", "Create account")
-        AuthMode.VERIFY -> Triple("Check your email", "Enter the code we sent to $pendingEmail. If the email only has a link, open it, then come back and sign in.", "Confirm email")
-        AuthMode.FORGOT -> Triple("Reset your password", "Enter your email and we will send you a code.", "Send code")
-        AuthMode.RESET -> Triple("Choose a new password", "Enter the code we sent to $pendingEmail and a new password. If the email only has a link, open it to reset your password on the website, then sign in here.", "Save new password")
+        AuthMode.SIGN_UP -> Triple("Create your account", "We will email you a link to confirm your address. Then an admin approves your account.", "Create account")
+        AuthMode.VERIFY -> Triple(
+            "Check your email",
+            "We sent a link to $pendingEmail. Open it on this phone or any other device to confirm your address, then come back and sign in. If the email has a code instead, enter it here.",
+            "Confirm with code",
+        )
+        AuthMode.FORGOT -> Triple("Reset your password", "Enter your email and we will send you a link to choose a new password.", "Send link")
+        AuthMode.RESET -> Triple(
+            "Check your email",
+            "Open the link we sent to $pendingEmail to choose a new password on the HelmetGuard website, then sign in here with it. If the email has a code instead, enter it here with your new password.",
+            "Save new password",
+        )
     }
 
     @Composable
@@ -316,13 +355,20 @@ fun SignInScreen(viewModel: AuthViewModel = hiltViewModel()) {
             }
             AuthMode.SIGN_UP -> TextButton({ go(AuthMode.SIGN_IN) }, Modifier.fillMaxWidth()) { Text("I already have an account") }
             AuthMode.VERIFY -> {
-                TextButton({ viewModel.resendCode() }, Modifier.fillMaxWidth(), enabled = ready) { Text("Send a new code") }
-                TextButton({ go(AuthMode.SIGN_IN) }, Modifier.fillMaxWidth()) { Text("Back to sign in") }
+                OutlinedButton(
+                    {
+                        if (email.isBlank()) email = pendingEmail
+                        go(AuthMode.SIGN_IN)
+                    },
+                    Modifier.fillMaxWidth().height(48.dp),
+                    shape = fieldShape,
+                ) { Text("I've confirmed my email: sign in") }
+                TextButton({ viewModel.resendCode() }, Modifier.fillMaxWidth(), enabled = ready) { Text("Send a new email") }
             }
             AuthMode.FORGOT -> TextButton({ go(AuthMode.SIGN_IN) }, Modifier.fillMaxWidth()) { Text("Back to sign in") }
             AuthMode.RESET -> {
-                TextButton({ viewModel.sendReset(pendingEmail) }, Modifier.fillMaxWidth(), enabled = ready) { Text("Send a new code") }
-                TextButton({ go(AuthMode.SIGN_IN) }, Modifier.fillMaxWidth()) { Text("Back to sign in") }
+                OutlinedButton({ go(AuthMode.SIGN_IN) }, Modifier.fillMaxWidth().height(48.dp), shape = fieldShape) { Text("I've chosen a new password: sign in") }
+                TextButton({ viewModel.sendReset(pendingEmail) }, Modifier.fillMaxWidth(), enabled = ready) { Text("Send a new email") }
             }
         }
     }
