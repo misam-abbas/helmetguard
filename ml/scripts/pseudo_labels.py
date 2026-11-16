@@ -147,8 +147,12 @@ def complete_labels(stage1: Path, splits=("train", "val", "test"), weights: str 
     for split in splits:
         images = sorted(p for p in (stage1 / "images" / split).iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
         log(f"Checking {len(images)} {split} images for unlabelled bikes")
-        for start in range(0, len(images), 256):
-            chunk = images[start : start + 256]
+        # Ultralytics runs a list of paths as ONE batch, so a longer list would have to fit in
+        # GPU memory all at once (256 images at 1280 px needed 18.75 GB on a 15 GB card).
+        for start in range(0, len(images), batch):
+            chunk = images[start : start + batch]
+            if start and start % 2000 < batch:
+                log(f"  {start}/{len(images)} {split} images")
             results = model.predict([str(p) for p in chunk], imgsz=imgsz, conf=min(MOTO_CONF, PERSON_CONF),
                                     classes=[PERSON, MOTORCYCLE], device=device, batch=batch, verbose=False,
                                     stream=True, half=str(device) != "cpu")

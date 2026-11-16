@@ -51,7 +51,7 @@ Trains the two detectors the Android app and the website need, and packages them
 
 **To run it**
 
-Click **Save Version**, choose **Save & Run All**, then **Save**. It runs in the background, so you can close the browser. Kaggle allows 12 hours and this run should take about 5.
+Click **Save Version**, choose **Save & Run All**, then **Save**. It runs in the background, so you can close the browser. Kaggle allows 12 hours and this run takes several, mostly training stage 1 on about 25,000 pictures.
 
 **When it finishes**
 
@@ -82,6 +82,9 @@ STAGE1_SIZE = 640  # was 416: small and distant bikes need the extra pixels
 STAGE2_SIZE = 320
 STAGE1_EPOCHS = 150
 STAGE2_EPOCHS = 100
+# Kaggle stops a run at 12 hours. Ultralytics fits the epochs into these limits.
+STAGE1_HOURS = 6.5
+STAGE2_HOURS = 1.0
 PATIENCE = 30
 STAGE1_BATCH = 32
 STAGE2_BATCH = 64
@@ -363,7 +366,7 @@ for prefix, title in (("helmet_", "HELMET frames from Myanmar"), ("dg_", "Indian
 TRAIN_HELPER = """from ultralytics import YOLO
 
 
-def train(name, data, imgsz, model, epochs, batch):
+def train(name, data, imgsz, model, epochs, batch, hours=None):
     run = RUNS / name
     done = run / "done.txt"
     last = run / "weights" / "last.pt"
@@ -392,15 +395,16 @@ def train(name, data, imgsz, model, epochs, batch):
             project=str(RUNS),
             name=name,
             exist_ok=True,
+            **({"time": hours} if hours else {}),
         )
     done.write_text("finished")
 """
 
-TRAIN1 = """train("stage1", STAGE1_YAML, STAGE1_SIZE, STAGE1_MODEL, STAGE1_EPOCHS, STAGE1_BATCH)
+TRAIN1 = """train("stage1", STAGE1_YAML, STAGE1_SIZE, STAGE1_MODEL, STAGE1_EPOCHS, STAGE1_BATCH, STAGE1_HOURS)
 """
 
 TRAIN2 = """if STAGE2_YAML:
-    train("stage2", STAGE2_YAML, STAGE2_SIZE, STAGE2_MODEL, STAGE2_EPOCHS, STAGE2_BATCH)
+    train("stage2", STAGE2_YAML, STAGE2_SIZE, STAGE2_MODEL, STAGE2_EPOCHS, STAGE2_BATCH, STAGE2_HOURS)
 else:
     print("Stage 2 is not retrained in this run: it needs the Roboflow dataset.")
 """

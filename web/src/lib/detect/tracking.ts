@@ -15,7 +15,7 @@ export type Rules = {
   minBareSpanMs: number;
 };
 
-// Same thresholds as the Android app, except it needs 5 frames: the web samples fewer frames per second.
+// Same thresholds as the Android app, except 4 bare-head frames instead of 5: the web samples fewer frames per second.
 export const DEFAULT_RULES: Rules = { minConfidence: 0.55, minBareFrames: 4, minBareShare: 0.7, minBareSpanMs: 500 };
 
 export class Track {

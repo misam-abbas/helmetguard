@@ -30,7 +30,7 @@ The phone does all detection, verification and storage by itself. Supabase recei
 
 | Source | https://github.com/misam-abbas/helmetguard |
 
-`helmetguard-prod` (decision 3) is not created yet; the plan makes that Phase 19. The live dashboard is deployed by direct upload, so it does not redeploy on push until the repository is connected in Vercel's project settings (that needs a GitHub login connection on the Vercel account). Vercel's Root Directory is already set to `web`. A direct upload has only the `web` folder, so its build downloads the detection models from the GitHub commit pinned in `web/models.lock.json` and checks their SHA-256; run `node web/scripts/lock-models.mjs` after committing new models.
+`helmetguard-prod` (decision 3) is not created yet; the plan makes that Phase 19. Pushing does not redeploy the dashboard, because the repository isn't connected in Vercel's project settings (that needs a GitHub login connection on the Vercel account). Instead, a deployment is created for a pushed commit through Vercel's API with a `gitSource` of `misam-abbas/helmetguard`; the repository is public, so Vercel can clone it without the connection, and the build copies the models from `android/`. Vercel's Root Directory is set to `web`. A deployment uploaded as files instead has only the `web` folder, so its build downloads the models from the GitHub commit pinned in `web/models.lock.json` and checks their SHA-256; run `node web/scripts/lock-models.mjs` after committing new models.
 
 ## Where the build differs from the plan
 

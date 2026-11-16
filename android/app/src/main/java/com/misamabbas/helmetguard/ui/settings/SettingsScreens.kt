@@ -241,6 +241,6 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
             style = MaterialTheme.typography.bodySmall,
         )
         Text("Licences", style = MaterialTheme.typography.titleSmall)
-        Text("HelmetGuard is open source under AGPL-3.0. Uses ONNX Runtime (MIT), Jetpack libraries (Apache-2.0) and supabase-kt (MIT). Models trained with Ultralytics YOLO (AGPL-3.0) on the dataset helmet-detection-and-license-plate-recognition by on Gia Capital (CC BY 4.0, Roboflow Universe).", style = MaterialTheme.typography.bodySmall)
+        Text("HelmetGuard is open source under AGPL-3.0. Uses ONNX Runtime (MIT), Jetpack libraries (Apache-2.0) and supabase-kt (MIT). Models trained with Ultralytics YOLO11 (AGPL-3.0) on helmet-detection-and-license-plate-recognition by on Gia Capital (CC BY 4.0, Roboflow Universe) and HELMET by Siebert and Lin (CC BY 4.0, OSF). Contains information from Trafffic_Violations_Triple_Riding_No_Helmet_Plate_ by DevguruCodes, made available under the ODbL.", style = MaterialTheme.typography.bodySmall)
     }
 }
