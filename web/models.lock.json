@@ -1,8 +1,8 @@
 {
-  "source": "https://raw.githubusercontent.com/misam-abbas/helmetguard/f5bd847ee8edaa153d7594f61a50e20737a1cbdb/android/app/src/main/assets/models/",
+  "source": "https://raw.githubusercontent.com/misam-abbas/helmetguard/c2b72b0e652436729d574895c090cf06335cf6a3/android/app/src/main/assets/models/",
   "files": {
-    "models.json": "280120b0590add8febb0d4777284f1ea8c95b6b8bc5cb85110be7da5f5e6238a",
-    "stage1.onnx": "30ed0897453bce06c794e40d7c284f4a8ff21cf1eff74838fcd887f8994b68ee",
-    "stage2.onnx": "3708eff09be528631a48ea33281bf07b028a8407c30aba47b1967f25f20d326e"
+    "models.json": "6de66f6dd0f80b09232aa76153add3afe93816dcd7187aa73fc68ee9a72825b3",
+    "stage1.onnx": "89ffa0a1040953ba5c15f81e175b8267f09ca9e4330f66de79b1131b451a0d22",
+    "stage2.onnx": "6b8ea68f5d8e941d76d3aab6a436586f6c066dc99a584a7f4119cd1ae72f1c03"
   }
 }
