@@ -7,6 +7,7 @@ import com.misamabbas.helmetguard.vision.verify.Candidate
 import com.misamabbas.helmetguard.vision.verify.Deduplicator
 import com.misamabbas.helmetguard.vision.verify.HeadState
 import com.misamabbas.helmetguard.vision.verify.HelmetVoteBook
+import com.misamabbas.helmetguard.vision.verify.ObservationBudget
 import com.misamabbas.helmetguard.vision.verify.RecentEvent
 import com.misamabbas.helmetguard.vision.verify.RiderObservation
 import com.misamabbas.helmetguard.vision.verify.RiderPolicy
@@ -149,11 +150,42 @@ class VerificationTest {
     }
 
     @Test
-    fun `very similar colour merges, different colour does not`() {
+    fun `very similar colour merges a bike that came back where it should be, different colour does not`() {
         val histogram = floatArrayOf(0.9f, 0.1f, 0f)
         val dedup = Deduplicator().apply { remember(event(histogram = histogram)) }
-        assertEquals("v1", dedup.findDuplicate(Candidate(4000, Box(0f, 0f, 10f, 10f), floatArrayOf(0.88f, 0.12f, 0f))))
-        assertNull(dedup.findDuplicate(Candidate(4000, Box(0f, 0f, 10f, 10f), floatArrayOf(0f, 0.1f, 0.9f))))
+        assertEquals("v1", dedup.findDuplicate(Candidate(4000, Box(110f, 100f, 310f, 400f), floatArrayOf(0.88f, 0.12f, 0f))))
+        assertNull(dedup.findDuplicate(Candidate(4000, Box(110f, 100f, 310f, 400f), floatArrayOf(0f, 0.1f, 0.9f))))
+    }
+
+    @Test
+    fun `a different bike elsewhere on the road is a new event even if its colours match`() {
+        // On one road most of every crop is the same tarmac, so colour alone can't tell bikes apart.
+        val histogram = floatArrayOf(0.9f, 0.1f, 0f)
+        val dedup = Deduplicator().apply { remember(event(histogram = histogram)) }
+        assertNull(dedup.findDuplicate(Candidate(3000, Box(700f, 100f, 900f, 400f), histogram)))
+    }
+
+    @Test
+    fun `a slow phone needs fewer bare-head frames, never under three`() {
+        fun confirms(cap: Int): Boolean {
+            val machine = ViolationStateMachine()
+            val votes = HelmetVoteBook().apply { observationCap = cap }
+            // Three bare heads, half a second apart: what a phone at two frames a second sees of a passing bike.
+            return feed(machine, votes, List(3) { HeadState.NO_HELMET }, stepMs = 500) == 1
+        }
+        assertFalse(confirms(Int.MAX_VALUE))
+        assertTrue(confirms(3))
+        assertEquals(3, ObservationBudget.cap(1.3f))
+        assertEquals(3, ObservationBudget.cap(2f))
+        assertEquals(4, ObservationBudget.cap(2.5f))
+        assertEquals(8, ObservationBudget.cap(5f))
+    }
+
+    @Test
+    fun `the lowered rule also decides the saved verdict`() {
+        val votes = HelmetVoteBook().apply { observationCap = 3 }
+        repeat(3) { i -> votes.observe(listOf(rider(front, HeadState.NO_HELMET, i * 500L))) }
+        assertEquals(RiderStatus.NO_HELMET, votes.verdicts(BikeMotion(100f, 0f)).single().status)
     }
 
     @Test

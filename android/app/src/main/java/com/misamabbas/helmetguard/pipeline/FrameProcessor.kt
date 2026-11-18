@@ -23,6 +23,7 @@ import com.misamabbas.helmetguard.vision.tracker.TrackerSettings
 import com.misamabbas.helmetguard.vision.verify.BikeMotion
 import com.misamabbas.helmetguard.vision.verify.HeadState
 import com.misamabbas.helmetguard.vision.verify.HelmetVoteBook
+import com.misamabbas.helmetguard.vision.verify.ObservationBudget
 import com.misamabbas.helmetguard.vision.verify.RiderObservation
 import com.misamabbas.helmetguard.vision.verify.RiderStatus
 import com.misamabbas.helmetguard.vision.verify.TrackState
@@ -83,6 +84,12 @@ data class PipelineConfig(
     val roadArea: Box? = null,
     val evidenceZone: Box? = null,
     val jpegQuality: Int = 88,
+    /**
+     * For the live camera: when the phone processes few frames a second, look at every bike's
+     * heads on every frame and ask for no more observations than one pass of a bike allows.
+     * Video sets its own frame rate, so it keeps the rules exactly as set.
+     */
+    val adaptToFrameRate: Boolean = false,
 )
 
 /** Everything the recorder needs about one track. */
@@ -144,11 +151,33 @@ class FrameProcessor(
     private val kinds: List<DetailKind?> = stage2?.classNames?.map(::kindOf).orEmpty()
 
     private var frameIndex = 0L
+    private var lastTimestampMs: Long? = null
+
+    /** Smoothed time between processed frames, in milliseconds. 0 until two frames have arrived. */
+    private var frameIntervalMs = 0f
+
     var totals = SessionTotals()
         private set
 
+    /** Every frame on a slow phone, so each bike still gets its heads checked often enough. */
+    private val detailEveryNthFrame: Int
+        get() = if (config.adaptToFrameRate && frameIntervalMs >= SLOW_FRAME_MS) 1 else 2
+
+    /** The most head observations a rider can be asked for, given how often this phone checks heads. */
+    private val observationCap: Int
+        get() = if (config.adaptToFrameRate && frameIntervalMs > 0f) {
+            ObservationBudget.cap(1000f / frameIntervalMs / detailEveryNthFrame)
+        } else {
+            Int.MAX_VALUE
+        }
+
     fun process(frame: Bitmap, timestampMs: Long): FrameOutput {
         frameIndex++
+        lastTimestampMs?.let { previous ->
+            val interval = (timestampMs - previous).coerceIn(1L, MAX_INTERVAL_MS).toFloat()
+            frameIntervalMs = if (frameIntervalMs == 0f) interval else frameIntervalMs * 0.8f + interval * 0.2f
+        }
+        lastTimestampMs = timestampMs
         val width = frame.width.toFloat()
         val height = frame.height.toFloat()
 
@@ -212,7 +241,7 @@ class FrameProcessor(
             val undecided = record.machine.state == TrackState.TRACKING || record.machine.state == TrackState.SUSPECT
             DetailCandidate(track.id, record.lastDetailFrame, undecided, isInEvidenceZone(track.box, width, height))
         }
-        val selected = DetailScheduler.select(candidates, frameIndex).toHashSet()
+        val selected = DetailScheduler.select(candidates, frameIndex, everyNthFrame = detailEveryNthFrame).toHashSet()
         val output = HashMap<Int, BikeDetails>()
 
         for (track in active) {
@@ -247,6 +276,10 @@ class FrameProcessor(
         width: Float,
         height: Float,
     ) {
+        // Fixed once the bike is decided, so its saved verdicts match the rule that decided it.
+        if (record.machine.state == TrackState.TRACKING || record.machine.state == TrackState.SUSPECT) {
+            record.votes.observationCap = observationCap
+        }
         record.votes.observe(
             details.riders.map { rider ->
                 RiderObservation(rider.riderBox.relativeTo(track.box), rider.head, rider.headConfidence, timestampMs)
@@ -277,6 +310,10 @@ class FrameProcessor(
         val sharpness = ImageMetrics.laplacianVariance(metricPixels, METRICS_SIZE, METRICS_SIZE)
         if (record.histogram == null) record.histogram = ImageMetrics.colorHistogram(metricPixels)
 
+        // Frames that actually show a counted bare head rank first, so the saved pictures show the rider without a helmet.
+        val bareHead = details.riders
+            .filter { it.head == HeadState.NO_HELMET && it.headConfidence >= config.verifier.minNoHelmetConfidence }
+            .maxOfOrNull { it.headConfidence } ?: 0f
         val score = FrameQualityScorer.score(
             FrameQualityInput(
                 motorcycle = track.box,
@@ -285,6 +322,7 @@ class FrameProcessor(
                 sharpness = sharpness,
                 confidence = track.confidence,
                 overlapWithOther = active.filter { it.id != track.id }.maxOfOrNull { it.box.iou(track.box) } ?: 0f,
+                bareHeadConfidence = bareHead,
             ),
         )
 
@@ -361,5 +399,11 @@ class FrameProcessor(
         const val DETAIL_MIN_CONFIDENCE = 0.25f
         // Same as CROP_PADDING in ml/scripts/prepare_public_dataset.py.
         const val DETAIL_PADDING = 0.08f
+
+        /** Four frames a second or fewer counts as a slow phone. */
+        const val SLOW_FRAME_MS = 250f
+
+        /** A gap longer than this (a pause, a hiccup) shouldn't distort the frame rate. */
+        const val MAX_INTERVAL_MS = 2_000L
     }
 }

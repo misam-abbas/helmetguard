@@ -1,6 +1,8 @@
 package com.misamabbas.helmetguard.vision.verify
 
 import com.misamabbas.helmetguard.vision.geometry.Box
+import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -26,12 +28,19 @@ data class DedupSettings(
     /** Position stops being meaningful quickly, because the next bike takes the same lane. */
     val positionWindowMs: Long = 2_000,
     val colorSimilarity: Float = 0.95f,
+    /**
+     * Colour alone can't tell two bikes on the same road apart: in the test pictures, half of
+     * the pairs of different bikes in one scene scored above 0.95, because most of a crop is
+     * road. So colour only re-links a bike that came back within this many box sizes of where
+     * the lost one should be by now.
+     */
+    val colorNearBoxes: Float = 0.5f,
 )
 
 /**
  * Layers two and three of duplicate prevention: a new confirmation inside the window
- * merges into an existing event when its predicted position or its colour agrees.
- * Number plates are not read, so they play no part.
+ * merges into an existing event when its predicted position agrees, or when its colour
+ * agrees and it is close to that position. Number plates are not read, so they play no part.
  */
 class Deduplicator(private val settings: DedupSettings = DedupSettings()) {
     private val recent = ArrayDeque<RecentEvent>()
@@ -52,20 +61,20 @@ class Deduplicator(private val settings: DedupSettings = DedupSettings()) {
 
     private fun matches(event: RecentEvent, candidate: Candidate): Boolean {
         val dtMs = candidate.timestampMs - event.timestampMs
-        if (dtMs <= settings.positionWindowMs) {
-            val seconds = dtMs / 1000f
-            val predicted = Box(
-                event.lastBox.left + event.velocityX * seconds,
-                event.lastBox.top + event.velocityY * seconds,
-                event.lastBox.right + event.velocityX * seconds,
-                event.lastBox.bottom + event.velocityY * seconds,
-            )
-            if (predicted.iou(candidate.box) >= settings.positionIou) return true
-        }
+        val seconds = dtMs / 1000f
+        val predicted = Box(
+            event.lastBox.left + event.velocityX * seconds,
+            event.lastBox.top + event.velocityY * seconds,
+            event.lastBox.right + event.velocityX * seconds,
+            event.lastBox.bottom + event.velocityY * seconds,
+        )
+        if (dtMs <= settings.positionWindowMs && predicted.iou(candidate.box) >= settings.positionIou) return true
 
-        val h1 = event.colorHistogram
-        val h2 = candidate.colorHistogram
-        return h1 != null && h2 != null && cosine(h1, h2) >= settings.colorSimilarity
+        val h1 = event.colorHistogram ?: return false
+        val h2 = candidate.colorHistogram ?: return false
+        val reach = settings.colorNearBoxes * max(predicted.width, predicted.height)
+        val near = hypot(predicted.centerX - candidate.box.centerX, predicted.centerY - candidate.box.centerY) <= reach
+        return near && cosine(h1, h2) >= settings.colorSimilarity
     }
 
     companion object {

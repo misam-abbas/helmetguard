@@ -1,5 +1,7 @@
 package com.misamabbas.helmetguard.vision
 
+import com.misamabbas.helmetguard.vision.evidence.FrameQualityInput
+import com.misamabbas.helmetguard.vision.evidence.FrameQualityScorer
 import com.misamabbas.helmetguard.vision.evidence.ImageMetrics
 import com.misamabbas.helmetguard.vision.geometry.Box
 import com.misamabbas.helmetguard.vision.pipeline.Association
@@ -72,6 +74,24 @@ class PipelineLogicTest {
         val c = listOf(DetailCandidate(1, 9, undecided = true, inEvidenceZone = true))
         assertTrue(DetailScheduler.select(c, frameIndex = 10).isEmpty())
         assertEquals(listOf(1), DetailScheduler.select(c, frameIndex = 11))
+    }
+
+    @Test
+    fun `on a slow phone the scheduler can visit a track every frame`() {
+        val c = listOf(DetailCandidate(1, 9, undecided = true, inEvidenceZone = false))
+        assertEquals(listOf(1), DetailScheduler.select(c, frameIndex = 10, everyNthFrame = 1))
+    }
+
+    @Test
+    fun `a frame showing the bare head outranks a sharper frame without it`() {
+        fun score(bike: Box, sharpness: Double, bareHead: Float) = FrameQualityScorer.score(
+            FrameQualityInput(bike, 1920f, 1080f, sharpness, confidence = 0.9f, overlapWithOther = 0f, bareHeadConfidence = bareHead),
+        )
+        val sharpBigWithoutHead = score(Box(600f, 200f, 1300f, 1000f), 900.0, 0f)
+        val smallBlurryWithHead = score(Box(100f, 100f, 300f, 300f), 50.0, 0.6f)
+        assertTrue(smallBlurryWithHead > sharpBigWithoutHead)
+        // Among frames that show it, the clearer head wins.
+        assertTrue(score(Box(100f, 100f, 300f, 300f), 50.0, 0.9f) > smallBlurryWithHead)
     }
 
     @Test

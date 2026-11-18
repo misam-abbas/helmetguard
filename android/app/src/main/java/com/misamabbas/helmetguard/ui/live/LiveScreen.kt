@@ -175,7 +175,7 @@ class LiveViewModel @Inject constructor(
                     processor = FrameProcessor(
                         stage1,
                         stage2,
-                        PipelineConfig(current.verifier(), current.stage1Confidence, ui.roadArea, ui.evidenceZone, current.jpegQuality),
+                        PipelineConfig(current.verifier(), current.stage1Confidence, ui.roadArea, ui.evidenceZone, current.jpegQuality, adaptToFrameRate = true),
                         listener,
                     )
                     sessionId = id

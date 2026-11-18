@@ -129,8 +129,18 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             FilterChip(s.riderPolicy == RiderPolicy.ALL_RIDERS, { viewModel.update { it.copy(riderPolicy = RiderPolicy.ALL_RIDERS) } }, { Text("Every rider") })
             FilterChip(s.riderPolicy == RiderPolicy.DRIVER_ONLY, { viewModel.update { it.copy(riderPolicy = RiderPolicy.DRIVER_ONLY) } }, { Text("Driver only") })
         }
+        if (s.riderPolicy == RiderPolicy.DRIVER_ONLY) {
+            Text("A passenger without a helmet won't raise an alert.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
 
-        SliderRow("Bare-head frames needed", s.minNoHelmetObservations.toString(), s.minNoHelmetObservations.toFloat(), 3f..15f, 11) { v -> viewModel.update { it.copy(minNoHelmetObservations = v.roundToInt()) } }
+        SliderRow(
+            "Bare-head frames needed",
+            s.minNoHelmetObservations.toString(),
+            s.minNoHelmetObservations.toFloat(),
+            3f..15f,
+            11,
+            hint = "The live camera asks for fewer when the phone is too slow to see a passing bike this often, never fewer than 3.",
+        ) { v -> viewModel.update { it.copy(minNoHelmetObservations = v.roundToInt()) } }
         SliderRow("Minimum head confidence", "%.2f".format(s.minNoHelmetConfidence), s.minNoHelmetConfidence, 0.3f..0.9f) { v -> viewModel.update { it.copy(minNoHelmetConfidence = v) } }
         SliderRow("Bare-head share of votes", "%.0f%%".format(s.minNoHelmetShare * 100), s.minNoHelmetShare, 0.5f..1f) { v -> viewModel.update { it.copy(minNoHelmetShare = v) } }
         SliderRow("Motorcycle confidence", "%.2f".format(s.stage1Confidence), s.stage1Confidence, 0.2f..0.8f) { v -> viewModel.update { it.copy(stage1Confidence = v) } }
@@ -149,13 +159,22 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun SliderRow(label: String, value: String, current: Float, range: ClosedFloatingPointRange<Float>, steps: Int = 0, onChange: (Float) -> Unit) {
+private fun SliderRow(
+    label: String,
+    value: String,
+    current: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
+    hint: String? = null,
+    onChange: (Float) -> Unit,
+) {
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = MaterialTheme.typography.bodyMedium)
             Text(value, style = MaterialTheme.typography.bodyMedium)
         }
         Slider(current, onChange, valueRange = range, steps = steps)
+        hint?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 

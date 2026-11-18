@@ -12,9 +12,11 @@ import com.misamabbas.helmetguard.data.db.SyncState
 import com.misamabbas.helmetguard.data.db.ViolationEntity
 import com.misamabbas.helmetguard.sync.SyncScheduler
 import com.misamabbas.helmetguard.vision.geometry.Box
+import com.misamabbas.helmetguard.vision.pipeline.AssociatedRider
 import com.misamabbas.helmetguard.vision.verify.BikeMotion
 import com.misamabbas.helmetguard.vision.verify.Candidate
 import com.misamabbas.helmetguard.vision.verify.Deduplicator
+import com.misamabbas.helmetguard.vision.verify.HeadState
 import com.misamabbas.helmetguard.vision.verify.RecentEvent
 import com.misamabbas.helmetguard.vision.verify.RiderRole
 import com.misamabbas.helmetguard.vision.verify.RiderStatus
@@ -35,6 +37,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.min
 
 /** Everything about one detection session that does not change while it runs. */
 data class SessionContext(
@@ -200,31 +203,34 @@ class ViolationRecorder @Inject constructor(
             add("full_frame", 0, best.jpeg, best.width, best.height, best.timestampMs, normalised(best.motorcycle, fullWidth, fullHeight))
             frames.getOrNull(1)?.let { add("alt_frame", 0, it.jpeg, it.width, it.height, it.timestampMs, upload = false) }
 
-            val decoded = BitmapFactory.decodeByteArray(best.jpeg, 0, best.jpeg.size)
-            if (decoded != null) {
-                cropJpeg(decoded, best.motorcycle, quality)?.let { (j, w, h) -> add("motorcycle", 0, j, w, h, best.timestampMs) }
-                add("thumb", 0, thumbnail(decoded, best.motorcycle), THUMB_WIDTH, THUMB_WIDTH * 3 / 4, best.timestampMs)
+            val decoded = HashMap<EvidenceFrame, Bitmap>()
+            fun pictureOf(frame: EvidenceFrame): Bitmap? =
+                decoded[frame] ?: BitmapFactory.decodeByteArray(frame.jpeg, 0, frame.jpeg.size)?.also { decoded[frame] = it }
 
-                // Riders are matched by where they sit on the bike, not by list order,
-                // because detectors do not return people in a stable order between frames.
-                val matched = verdicts.associateWith { verdict ->
-                    best.riders.minByOrNull { rider ->
-                        val r = rider.riderBox.relativeTo(best.motorcycle)
-                        hypot(r.centerX - verdict.relativeBox.centerX, r.centerY - verdict.relativeBox.centerY)
-                    }
-                }
-                var riderSeq = 0
-                var headSeq = 0
-                verdicts.filter { it.status == RiderStatus.NO_HELMET }.forEach { verdict ->
-                    val rider = matched[verdict] ?: return@forEach
-                    cropJpeg(decoded, rider.riderBox, quality)?.let { (j, w, h) -> add("rider", riderSeq++, j, w, h, best.timestampMs) }
-                    rider.headBox?.let { head -> cropJpeg(decoded, head, quality)?.let { (j, w, h) -> add("head", headSeq++, j, w, h, best.timestampMs) } }
-                }
-                ridersJson = buildJsonArray {
-                    verdicts.forEach { verdict -> add(riderJson(verdict, matched[verdict]?.riderBox, fullWidth, fullHeight)) }
-                }
-                decoded.recycle()
+            pictureOf(best)?.let { picture ->
+                cropJpeg(picture, best.motorcycle, quality)?.let { (j, w, h) -> add("motorcycle", 0, j, w, h, best.timestampMs) }
+                add("thumb", 0, thumbnail(picture, best.motorcycle), THUMB_WIDTH, THUMB_WIDTH * 3 / 4, best.timestampMs)
             }
+
+            // Riders are matched by where they sit on the bike, not by list order,
+            // because detectors do not return people in a stable order between frames.
+            val matched = verdicts.associateWith { verdict -> nearestRider(best, verdict) }
+            var riderSeq = 0
+            var headSeq = 0
+            verdicts.filter { it.status == RiderStatus.NO_HELMET }.forEach { verdict ->
+                // From the kept frame where this rider's bare head was seen most clearly, so the picture shows it.
+                val (frame, rider) = bareHeadView(frames, verdict) ?: (best to (matched[verdict] ?: return@forEach))
+                val picture = pictureOf(frame) ?: return@forEach
+                cropJpeg(picture, riderRegion(rider, frame.motorcycle), quality)?.let { (j, w, h) -> add("rider", riderSeq++, j, w, h, frame.timestampMs) }
+                rider.headBox?.let { head ->
+                    val withMargin = head.expand(HEAD_MARGIN, frame.width.toFloat(), frame.height.toFloat())
+                    cropJpeg(picture, withMargin, quality)?.let { (j, w, h) -> add("head", headSeq++, j, w, h, frame.timestampMs) }
+                }
+            }
+            ridersJson = buildJsonArray {
+                verdicts.forEach { verdict -> add(riderJson(verdict, matched[verdict]?.riderBox, fullWidth, fullHeight)) }
+            }
+            decoded.values.forEach { it.recycle() }
         }
 
         // Number plates are not detected or read. The evidence is the whole frame, the
@@ -256,6 +262,36 @@ class ViolationRecorder @Inject constructor(
         db.violations().finalise(updated, rows)
         sync.syncSoon()
         return false
+    }
+
+    private fun nearestRider(frame: EvidenceFrame, verdict: RiderVerdict): AssociatedRider? =
+        frame.riders.minByOrNull { distance(it.riderBox.relativeTo(frame.motorcycle), verdict.relativeBox) }
+
+    /** The kept frame, and this rider in it, where their bare head was detected most confidently. */
+    private fun bareHeadView(frames: List<EvidenceFrame>, verdict: RiderVerdict): Pair<EvidenceFrame, AssociatedRider>? =
+        frames.mapNotNull { frame ->
+            val rider = nearestRider(frame, verdict) ?: return@mapNotNull null
+            val sameRider = distance(rider.riderBox.relativeTo(frame.motorcycle), verdict.relativeBox) <= SAME_RIDER_DISTANCE
+            if (sameRider && rider.head == HeadState.NO_HELMET) frame to rider else null
+        }.maxByOrNull { (_, rider) -> rider.headConfidence }
+
+    private fun distance(a: Box, b: Box) = hypot(a.centerX - b.centerX, a.centerY - b.centerY)
+
+    /**
+     * The rider, not just their head. The head model has no class for a whole person, so the
+     * rider box is often the head itself; then the picture runs from just above the head to the
+     * bottom of the bike, three heads wide.
+     */
+    private fun riderRegion(rider: AssociatedRider, motorcycle: Box): Box {
+        val head = rider.headBox
+        if (head == null || rider.riderBox != head) return rider.riderBox
+        val halfWidth = head.width * 1.5f
+        return Box(
+            max(motorcycle.left, head.centerX - halfWidth),
+            head.top - head.height * 0.5f,
+            min(motorcycle.right, head.centerX + halfWidth),
+            max(head.bottom, motorcycle.bottom),
+        )
     }
 
     private fun cropJpeg(source: Bitmap, box: Box, quality: Int): Triple<ByteArray, Int, Int>? {
@@ -333,5 +369,11 @@ class ViolationRecorder @Inject constructor(
     private companion object {
         const val THUMB_WIDTH = 320
         const val THUMB_QUALITY = 70
+
+        /** Room around a head crop, as a share of its size, so the picture shows more than a face. */
+        const val HEAD_MARGIN = 0.25f
+
+        /** Same as HelmetVoteBook: further apart than this (in bike-box units) is a different rider. */
+        const val SAME_RIDER_DISTANCE = 0.30f
     }
 }

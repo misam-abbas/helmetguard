@@ -3,6 +3,9 @@ package com.misamabbas.helmetguard.vision.verify
 import com.misamabbas.helmetguard.vision.geometry.Box
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 enum class HeadState { HELMET, NO_HELMET }
 enum class RiderRole { DRIVER, PILLION }
@@ -61,6 +64,16 @@ class HelmetVoteBook(private val settings: VerifierSettings = VerifierSettings()
 
     private val riders = mutableListOf<Rider>()
 
+    /**
+     * Most observations a rider can be asked for, bare head or helmet. Unlimited by default;
+     * on a phone too slow to see a passing bike that often, the live camera lowers it
+     * (see [ObservationBudget]). The confidence, share and time-span rules still apply.
+     */
+    var observationCap: Int = Int.MAX_VALUE
+
+    private val minNoHelmet: Int get() = min(settings.minNoHelmetObservations, observationCap)
+    private val minHelmet: Int get() = min(settings.minHelmetObservations, observationCap)
+
     /** True once any rider has a qualifying bare-head observation. */
     val anyNoHelmet: Boolean get() = riders.any { it.noHelmetCount > 0 }
     val riderCount: Int get() = riders.size
@@ -97,7 +110,7 @@ class HelmetVoteBook(private val settings: VerifierSettings = VerifierSettings()
     }
 
     private fun meetsRules(rider: Rider): Boolean =
-        rider.noHelmetCount >= settings.minNoHelmetObservations &&
+        rider.noHelmetCount >= minNoHelmet &&
             rider.noHelmetCount.toFloat() / rider.decided >= settings.minNoHelmetShare &&
             rider.lastNoHelmetMs - rider.firstNoHelmetMs >= settings.minNoHelmetSpanMs
 
@@ -125,7 +138,7 @@ class HelmetVoteBook(private val settings: VerifierSettings = VerifierSettings()
         if (riders.isEmpty() || riders.any { it.noHelmetCount > 0 && it.helmetCount < it.noHelmetCount }) return false
         val decided = riders.filter { it.decided > 0 }
         return decided.isNotEmpty() && decided.all {
-            it.helmetCount >= settings.minHelmetObservations &&
+            it.helmetCount >= minHelmet &&
                 it.helmetCount.toFloat() / it.decided >= settings.minNoHelmetShare
         }
     }
@@ -143,7 +156,7 @@ class HelmetVoteBook(private val settings: VerifierSettings = VerifierSettings()
         return riders.map { rider ->
             val status = when {
                 meetsRules(rider) -> RiderStatus.NO_HELMET
-                rider.helmetCount >= settings.minHelmetObservations && rider.helmetCount.toFloat() / rider.decided >= settings.minNoHelmetShare -> RiderStatus.HELMET
+                rider.helmetCount >= minHelmet && rider.helmetCount.toFloat() / rider.decided >= settings.minNoHelmetShare -> RiderStatus.HELMET
                 else -> RiderStatus.UNKNOWN
             }
             val confidence = when (status) {
@@ -165,3 +178,19 @@ class HelmetVoteBook(private val settings: VerifierSettings = VerifierSettings()
 
 /** Pixels per second, taken from the motorcycle's track. */
 data class BikeMotion(val velocityX: Float, val growthRate: Float)
+
+/**
+ * How many head observations a phone can make while a bike passes. A slow phone runs the live
+ * camera at about two frames a second, so a rule written for video, five or more bare-head
+ * frames, can't be met by a bike that is in view for two seconds: no alert, no snapshot.
+ * The cap keeps the rule within reach of one such pass, and never goes below three.
+ */
+object ObservationBudget {
+    const val FLOOR = 3
+
+    /** About how long a passing bike stays close enough for its riders' heads to be judged. */
+    const val PASS_MS = 1_500L
+
+    fun cap(observationsPerSecond: Float): Int =
+        max(FLOOR, (observationsPerSecond * PASS_MS / 1000f).roundToInt())
+}
