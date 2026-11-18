@@ -1,5 +1,5 @@
 {
-  "version": "yolo11n-v2",
+  "version": "yolo11n-v3",
   "stage1": { "file": "stage1.onnx", "input": 640, "classes": ["motorcycle_unit"] },
   "stage2": { "file": "stage2.onnx", "input": 320, "classes": ["helmet", "no_helmet"] }
 }

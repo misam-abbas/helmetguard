@@ -20,6 +20,23 @@
 
 Known weakness of the second version: it sometimes boxes a bicycle and its rider as a motorcycle (5 of its 31 extra boxes on the Indian traffic sample). An alert still needs a bare head in several frames (5 in the app, 4 on the website), and a person reviews every alert.
 
+### Third version (`yolo11n-v3`): Karachi traffic cameras
+
+The third version fine-tunes the second version's models (fetched from version 4 of the Kaggle notebook) on the same data plus 422 frames from Karachi traffic cameras with every bike and head boxed (`DATASETS.md`, `scripts/bike_head_dataset.py`). It is the first time either model sees Pakistani riders' heads. Two of the dataset's videos are kept back, and the notebook scores both the old and the new models on them, so `metrics.json` in the zip has before and after numbers on identical pictures, with confusion matrices and precision-recall curves under `plots/`.
+
+Results of version 6 of the notebook (4.7 hours on Kaggle), second version → third version on the same test pictures:
+
+| Test | Precision | Recall | mAP50 | mAP50-95 |
+|---|---|---|---|---|
+| Stage 1, all test pictures | 0.879 → 0.882 | 0.854 → 0.868 | 0.934 → 0.934 | 0.773 → 0.775 |
+| Stage 1, Karachi test videos | 0.983 → 0.997 | 0.917 → 0.984 | 0.985 → 0.995 | 0.639 → 0.769 |
+| Stage 2 `no_helmet`, all test crops | 0.891 → 0.896 | 0.708 → 0.848 | 0.784 → 0.915 | 0.470 → 0.563 |
+| Stage 2 `helmet`, all test crops | 0.620 → 0.726 | 0.626 → 0.897 | 0.603 → 0.896 | 0.247 → 0.506 |
+| Stage 2 `no_helmet`, Karachi test crops | 0.451 → 0.877 | 0.179 → 0.764 | 0.201 → 0.898 | 0.046 → 0.489 |
+| Stage 2 `helmet`, Karachi test crops | 0.329 → 0.644 | 0.588 → 0.897 | 0.358 → 0.873 | 0.075 → 0.475 |
+
+Stage 1 per source, third version: Myanmar mAP50 0.955, Indian traffic 0.921, Karachi 0.995. On the original Roboflow test pictures with their incomplete labels it scores 0.603 (second version 0.628). At the app's cut-off (0.35), on 80 test pictures per source, `compare_models.py` found the third version equal or better everywhere (Karachi recall 0.845 → 0.992, Indian traffic precision 0.726 → 0.781), but on two Pakistani street videos filmed on phones it boxed 178 bikes against 191: it skips some riders cut off at the edge of the picture and some very distant bikes. The second version barely recognised Karachi riders' heads (bare-head recall 0.18); that, not finding bikes, is what kept alerts from being raised on Pakistani roads.
+
 The notebooks are generated, so edit `scripts/build_notebook.py` and run it rather than changing the `.ipynb` files. Before spending GPU time, check a change with the unit tests and a one-epoch run of the notebook's own code on a tiny fake dataset (needs `torch` and `ultralytics`, and internet for a few HELMET frames):
 
 ```powershell

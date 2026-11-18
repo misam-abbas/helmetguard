@@ -12,21 +12,22 @@ from pathlib import Path
 
 ML = Path(__file__).resolve().parents[1]
 SCRIPTS = ML / "scripts"
-MODULES = ["prepare_public_dataset.py", "helmet_dataset.py", "extra_datasets.py", "pseudo_labels.py"]
+MODULES = ["prepare_public_dataset.py", "helmet_dataset.py", "extra_datasets.py", "bike_head_dataset.py", "pseudo_labels.py"]
 
 DATA_NOTE = """**What this run uses**
 
 - *HELMET* by Siebert and Lin (2020), CC BY 4.0, https://osf.io/4pwj8/: 910 clips of road traffic in Myanmar with every nearby motorcycle boxed. About one frame per second is used.
 - *Trafffic_Violations_Triple_Riding_No_Helmet_Plate_* by DevguruCodes on Kaggle, ODbL: Indian traffic pictures. Add it under **Add Input** if this notebook can't fetch it by itself.
 - *helmet-detection-and-license-plate-recognition* by on Gia Capital, CC BY 4.0, via Roboflow Universe, **only if a Roboflow key is set up** (see below). It has the head labels, so without it stage 2 isn't retrained and the app keeps its current head model.
+- *Helmet vs No Helmet*, version 3, by Uzair Ahmad Khan, CC BY 4.0 (Roboflow Universe, copied to Kaggle as uzairahmad1434/helmet-violation): 422 frames from Karachi traffic cameras on Shahrah-e-Faisal, with every bike and every head boxed. **Add it under Add Input**: a Save & Run All run can't attach a dataset by itself. Its videos are split so that none is in two splits, and two of them are kept back as a Pakistani test set.
 - A large COCO-trained YOLO11x only labels ridden motorcycles that the datasets left without a box. It is not shipped.
 
 Number plates are never a training label, so the models can't detect them.
 
-**Accuracy warning.** Neither dataset was filmed in Pakistan, so expect real results on your roads to be somewhat worse than these scores. Your own footage is still the best way to improve the model.
+**Accuracy warning.** Only the Karachi frames were filmed in Pakistan, and they come from a few elevated cameras on one road, so expect real results elsewhere on your roads to be somewhat worse than these scores. Your own footage is still the best way to improve the model.
 """
 
-COLAB_INTRO = """# Train HelmetGuard's models (version 2)
+COLAB_INTRO = """# Train HelmetGuard's models (version 3)
 
 Trains the two detectors the Android app and the website need, and packages them.
 
@@ -40,7 +41,7 @@ Training takes several hours. Progress is saved to Google Drive after every epoc
 
 """ + DATA_NOTE
 
-KAGGLE_INTRO = """# Train HelmetGuard's models on Kaggle (version 2)
+KAGGLE_INTRO = """# Train HelmetGuard's models on Kaggle (version 3)
 
 Trains the two detectors the Android app and the website need, and packages them.
 
@@ -51,7 +52,7 @@ Trains the two detectors the Android app and the website need, and packages them
 
 **To run it**
 
-Click **Save Version**, choose **Save & Run All**, then **Save**. It runs in the background, so you can close the browser. Kaggle allows 12 hours and this run takes several, mostly training stage 1 on about 25,000 pictures.
+Click **Save Version**, choose **Save & Run All**, then **Save**. It runs in the background, so you can close the browser. Kaggle allows 12 hours and this run takes several, mostly training stage 1 on about 25,000 pictures. With version 4 of this notebook added under **Add Input** (its output holds the models in the app now), it fine-tunes those models instead of starting over, which takes less time.
 
 **When it finishes**
 
@@ -75,7 +76,7 @@ KAGGLE_GPU = gpu_check("Choose Settings > Accelerator > GPU T4 x2, then Save & R
 INSTALL = """%pip install -q ultralytics==8.4.208 onnx==1.23.2 onnxruntime==1.31.1 onnxslim==0.1.99
 """
 
-TRAINING_SETTINGS = """VERSION = "yolo11n-v2"
+TRAINING_SETTINGS = """VERSION = "yolo11n-v3"
 STAGE1_MODEL = "yolo11n.pt"
 STAGE2_MODEL = "yolo11n.pt"
 STAGE1_SIZE = 640  # was 416: small and distant bikes need the extra pixels
@@ -105,6 +106,25 @@ HELMET_LIMIT_CLIPS = None
 
 # Where Kaggle puts datasets added under Add Input.
 EXTRA_SEARCH = [Path("/kaggle/input")]
+
+# Karachi traffic cameras, every bike and head boxed (CC BY 4.0). Its videos go to one split each:
+# these to validation and test, every other one to training.
+PAKISTAN_DATASET = "uzairahmad1434/helmet-violation"
+PAKISTAN_SPLITS = {
+    "WhatsApp-Video-2026-03-25-at-15_24_50_mp4": "val",
+    "WhatsApp-Video-2026-03-25-at-15_24_50-1-_mp4": "test",
+    "WhatsApp-Video-2026-03-25-at-15_24_51_mp4": "test",
+}
+# 422 frames next to about 25,000: training copies so they still carry weight.
+PAKISTAN_STAGE1_REPEATS = 2
+PAKISTAN_STAGE2_REPEATS = 3
+
+# The run that made the models in the app now. When its weights can be fetched, this run
+# fine-tunes them on the combined data, which needs fewer epochs than starting over.
+PREVIOUS_RUN = "misamsirohi/notebook0bacc84a05/versions/4"
+FINE_TUNE_EPOCHS = 60
+FINE_TUNE_STAGE1_HOURS = 3.5
+FINE_TUNE_STAGE2_HOURS = 0.75
 """
 
 COLAB_SETUP = """from pathlib import Path
@@ -143,7 +163,8 @@ TEMP.mkdir(parents=True, exist_ok=True)
 ZIP = TEMP / "dataset_yolov8.zip"
 RAW = TEMP / "raw"
 PREPARED = TEMP / "prepared"
-VAL_DIR = TEMP / "val"
+# Kept in the output, so the confusion matrices and curves can be looked at afterwards.
+VAL_DIR = SAVE_DIR / "val"
 print("Saving results to", SAVE_DIR)
 """
 
@@ -244,13 +265,13 @@ STAGE1_YAML = str(prepare_public_dataset.write_yaml(STAGE1, ["motorcycle_unit"])
 LABEL_STATS = {"prepare": stats}
 
 
-def subset(name, keep, label_root=STAGE1):
-    \"\"\"A test-only dataset with the stage 1 test images that `keep` accepts, for separate scores.\"\"\"
+def subset(name, keep, label_root=STAGE1, source=STAGE1, names=("motorcycle_unit",)):
+    \"\"\"A test-only dataset with the test images of `source` that `keep` accepts, for separate scores.\"\"\"
     root = PREPARED / name
     for kind in ("images", "labels"):
         (root / kind / "test").mkdir(parents=True, exist_ok=True)
     count = 0
-    for image in sorted((STAGE1 / "images" / "test").iterdir()):
+    for image in sorted((source / "images" / "test").iterdir()):
         if not keep(image.name):
             continue
         shutil.copy2(image, root / "images" / "test" / image.name)
@@ -258,7 +279,8 @@ def subset(name, keep, label_root=STAGE1):
         if label.exists():
             shutil.copy2(label, root / "labels" / "test" / label.name)
         count += 1
-    lines = [f"path: {root.resolve().as_posix()}", "train: images/test", "val: images/test", "test: images/test", "names:", "  0: motorcycle_unit"]
+    lines = [f"path: {root.resolve().as_posix()}", "train: images/test", "val: images/test", "test: images/test", "names:"]
+    lines += [f"  {index}: {class_name}" for index, class_name in enumerate(names)]
     (root / "data.yaml").write_text("\\n".join(lines) + "\\n", encoding="utf-8")
     return str(root / "data.yaml"), count
 
@@ -287,6 +309,51 @@ try:
 except Exception as error:
     LABEL_STATS["devguru"] = {"error": f"{type(error).__name__}: {error}"}
     print("WARNING: the Indian traffic pictures could not be added, so this run goes on without them.", error)
+"""
+
+RUN_PAKISTAN = """import bike_head_dataset
+
+STAGE2 = PREPARED / "stage2"
+try:
+    root = bike_head_dataset.find_dataset(EXTRA_SEARCH)
+    if root is None:
+        import kagglehub
+
+        root = bike_head_dataset.find_dataset([Path(kagglehub.dataset_download(PAKISTAN_DATASET))])
+    if root is None:
+        raise FileNotFoundError(f"{PAKISTAN_DATASET} has no data.yaml with bike, helmet and no helmet classes")
+    LABEL_STATS["pakistan"] = bike_head_dataset.add_bike_head_dataset(
+        root,
+        STAGE1,
+        STAGE2,
+        "pk",
+        PAKISTAN_SPLITS,
+        stage1_repeats=PAKISTAN_STAGE1_REPEATS,
+        stage2_repeats=PAKISTAN_STAGE2_REPEATS,
+    )
+    print(json.dumps(LABEL_STATS["pakistan"], indent=2))
+except Exception as error:
+    LABEL_STATS["pakistan"] = {"error": f"{type(error).__name__}: {error}"}
+    print("WARNING: the Karachi pictures could not be added, so this run goes on without them.", error)
+"""
+
+PREVIOUS = """# The models in the app now, from version 4 of this notebook. Fine-tuning them needs fewer epochs
+# than starting over; without them this run trains from YOLO11n as the first two did.
+# Add that version's output under Add Input: a Save & Run All run can't attach anything new itself.
+PREVIOUS = {}
+for stage in ("stage1", "stage2"):
+    found = sorted(path for root in EXTRA_SEARCH if root.exists() for path in root.rglob(f"runs/{stage}/weights/best.pt"))
+    if found:
+        PREVIOUS[stage] = str(found[0])
+if len(PREVIOUS) < 2:
+    try:
+        import kagglehub
+
+        for stage in ("stage1", "stage2"):
+            PREVIOUS.setdefault(stage, kagglehub.notebook_output_download(PREVIOUS_RUN, path=f"runs/{stage}/weights/best.pt"))
+    except Exception as error:
+        print("The previous run's models could not all be fetched:", type(error).__name__, error)
+print("Fine-tuning these previous models (anything missing trains from YOLO11n):", PREVIOUS)
 """
 
 RUN_HELMET = """import helmet_dataset
@@ -322,11 +389,19 @@ if torch.cuda.is_available():
     torch.cuda.empty_cache()
 
 SOURCE_TESTS = {}
-for prefix, label in (("helmet_", "helmet"), ("dg_", "indian_traffic")):
+for prefix, label in (("helmet_", "helmet"), ("dg_", "indian_traffic"), ("pk_", "pakistan")):
     yaml_path, count = subset(f"stage1_{label}_test", lambda name, p=prefix: name.startswith(p))
     print(label, "test images:", count)
     if count:
         SOURCE_TESTS[label] = yaml_path
+
+# Heads on Pakistani bikes, from videos stage 2 never trains on.
+STAGE2_PAKISTAN_TEST_YAML = None
+if STAGE2_YAML:
+    yaml_path, count = subset("stage2_pakistan_test", lambda name: name.startswith("pk_"), label_root=STAGE2, source=STAGE2, names=STAGE2_NAMES)
+    print("pakistan stage 2 test crops:", count)
+    if count:
+        STAGE2_PAKISTAN_TEST_YAML = yaml_path
 if not any((STAGE1 / "images" / "train").iterdir()):
     raise RuntimeError("No training pictures at all: every dataset failed to load. See the warnings above.")
 (SAVE_DIR / "label_stats.json").write_text(json.dumps(LABEL_STATS, indent=2))
@@ -358,7 +433,7 @@ def show(paths, title):
 rng = random.Random(SEED)
 changed = sorted(ADDED_BOXES)
 show(rng.sample(changed, min(6, len(changed))), "Red: the dataset's own boxes. Yellow: boxes added for bikes it missed")
-for prefix, title in (("helmet_", "HELMET frames from Myanmar"), ("dg_", "Indian traffic pictures")):
+for prefix, title in (("helmet_", "HELMET frames from Myanmar"), ("dg_", "Indian traffic pictures"), ("pk_", "Karachi traffic cameras")):
     frames = sorted((STAGE1 / "images" / "train").glob(f"{prefix}*"))
     show(rng.sample(frames, min(6, len(frames))), f"{title}, with all their boxes")
 """
@@ -400,19 +475,26 @@ def train(name, data, imgsz, model, epochs, batch, hours=None):
     done.write_text("finished")
 """
 
-TRAIN1 = """train("stage1", STAGE1_YAML, STAGE1_SIZE, STAGE1_MODEL, STAGE1_EPOCHS, STAGE1_BATCH, STAGE1_HOURS)
+TRAIN1 = """if "stage1" in PREVIOUS:
+    train("stage1", STAGE1_YAML, STAGE1_SIZE, PREVIOUS["stage1"], FINE_TUNE_EPOCHS, STAGE1_BATCH, FINE_TUNE_STAGE1_HOURS)
+else:
+    train("stage1", STAGE1_YAML, STAGE1_SIZE, STAGE1_MODEL, STAGE1_EPOCHS, STAGE1_BATCH, STAGE1_HOURS)
 """
 
-TRAIN2 = """if STAGE2_YAML:
-    train("stage2", STAGE2_YAML, STAGE2_SIZE, STAGE2_MODEL, STAGE2_EPOCHS, STAGE2_BATCH, STAGE2_HOURS)
-else:
+TRAIN2 = """if not STAGE2_YAML:
     print("Stage 2 is not retrained in this run: it needs the Roboflow dataset.")
+elif "stage2" in PREVIOUS:
+    train("stage2", STAGE2_YAML, STAGE2_SIZE, PREVIOUS["stage2"], FINE_TUNE_EPOCHS, STAGE2_BATCH, FINE_TUNE_STAGE2_HOURS)
+else:
+    train("stage2", STAGE2_YAML, STAGE2_SIZE, STAGE2_MODEL, STAGE2_EPOCHS, STAGE2_BATCH, STAGE2_HOURS)
 """
 
 EVALUATE = """def evaluate(name, weights, data, imgsz):
+    \"\"\"Scores a run (by name) or a .pt file on a test set. Plots, such as the confusion matrix, go to VAL_DIR/name.\"\"\"
     if not data:
         return None
-    metrics = YOLO(str(RUNS / weights / "weights" / "best.pt")).val(data=data, split="test", imgsz=imgsz, device=DEVICE, project=str(VAL_DIR), name=name, exist_ok=True)
+    path = weights if str(weights).endswith(".pt") else RUNS / weights / "weights" / "best.pt"
+    metrics = YOLO(str(path)).val(data=data, split="test", imgsz=imgsz, device=DEVICE, project=str(VAL_DIR), name=name, exist_ok=True)
     rows = {}
     for index, class_id in enumerate(metrics.box.ap_class_index):
         precision, recall, map50, map50_95 = metrics.box.class_result(index)
@@ -433,7 +515,21 @@ for label, yaml_path in SOURCE_TESTS.items():
     results[f"stage1_{label}_test"] = evaluate(f"stage1_{label}", "stage1", yaml_path, STAGE1_SIZE)
 if STAGE2_YAML:
     results["stage2"] = evaluate("stage2", "stage2", STAGE2_YAML, STAGE2_SIZE)
+    results["stage2_pakistan_test"] = evaluate("stage2_pakistan", "stage2", STAGE2_PAKISTAN_TEST_YAML, STAGE2_SIZE)
+
+# The models in the app now, on exactly the same test pictures, so the change is measured fairly.
+if "stage1" in PREVIOUS:
+    results["previous_stage1"] = evaluate("previous_stage1", PREVIOUS["stage1"], STAGE1_YAML, STAGE1_SIZE)
+    results["previous_stage1_pakistan_test"] = evaluate("previous_stage1_pakistan", PREVIOUS["stage1"], SOURCE_TESTS.get("pakistan"), STAGE1_SIZE)
+if "stage2" in PREVIOUS and STAGE2_YAML:
+    results["previous_stage2"] = evaluate("previous_stage2", PREVIOUS["stage2"], STAGE2_YAML, STAGE2_SIZE)
+    results["previous_stage2_pakistan_test"] = evaluate("previous_stage2_pakistan", PREVIOUS["stage2"], STAGE2_PAKISTAN_TEST_YAML, STAGE2_SIZE)
 print(json.dumps(results, indent=2))
+
+for group in ("stage1_pakistan_test", "stage2_pakistan_test", "stage1", "stage2"):
+    for cls, new in (results.get(group) or {}).items():
+        old = ((results.get(f"previous_{group}") or {}).get(cls) or {})
+        print(f"{group} {cls}: mAP50 {old.get('mAP50', '-')} -> {new['mAP50']}, recall {old.get('recall', '-')} -> {new['recall']}")
 
 
 def score(group, cls, key):
@@ -559,6 +655,12 @@ with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         add_eval_sample(archive, PREPARED / "stage1_original_test", "original", 80)
     for label in SOURCE_TESTS:
         add_eval_sample(archive, PREPARED / f"stage1_{label}_test", label, 80)
+    if STAGE2_PAKISTAN_TEST_YAML:
+        add_eval_sample(archive, PREPARED / "stage2_pakistan_test", "pakistan_heads", 120)
+    # Confusion matrices and precision-recall curves of every test above.
+    for plot in sorted(VAL_DIR.glob("*/*.png")):
+        if "confusion" in plot.name or "PR_curve" in plot.name:
+            archive.write(plot, f"plots/{plot.parent.name}_{plot.name}")
 print(f"{output.stat().st_size / 1e6:.1f} MB")
 """
 
@@ -602,14 +704,17 @@ def write_notebook(filename, intro, opening, setup, api_key, package, done, plat
         cell("code", RUN_HELMET),
         cell("markdown", "### Add Indian traffic pictures\n"),
         cell("code", RUN_EXTRA),
+        cell("markdown", "### Add Karachi traffic-camera pictures\n"),
+        cell("code", RUN_PAKISTAN),
         cell("markdown", "### Box the ridden bikes the datasets missed\n"),
         cell("code", RUN_PSEUDO),
         cell("code", SAMPLES),
         cell("markdown", "## 3. Train\n\nStage 1 finds motorcycles. Stage 2 looks inside each one for heads with and without helmets.\n"),
+        cell("code", PREVIOUS),
         cell("code", TRAIN_HELPER),
         cell("code", TRAIN1),
         cell("code", TRAIN2),
-        cell("markdown", "## 4. Measure on unseen videos\n"),
+        cell("markdown", "## 4. Measure on unseen videos, against the models in the app now\n"),
         cell("code", EVALUATE),
         cell("markdown", "## 5. Export for the phone and the website, and check it\n"),
         cell("code", EXPORT),
