@@ -45,9 +45,9 @@ class ModelStore @Inject constructor(@ApplicationContext private val context: Co
         ModelStatus.Ready(manifest)
     }.getOrDefault(ModelStatus.Missing)
 
-    fun create(entry: ModelEntry): Detector {
+    fun create(entry: ModelEntry, runtime: RuntimeOptions = RuntimeOptions.DEFAULT): OnnxDetector {
         val bytes = context.assets.open("models/${entry.file}").use { it.readBytes() }
-        return OnnxDetector(bytes, entry.input, entry.classes)
+        return OnnxDetector(bytes, entry.input, entry.classes, runtime)
     }
 }
 

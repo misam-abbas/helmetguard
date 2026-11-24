@@ -2,6 +2,8 @@ package com.misamabbas.helmetguard.pipeline
 
 import android.graphics.Bitmap
 import android.os.SystemClock
+import android.util.Log
+import com.misamabbas.helmetguard.BuildConfig
 import com.misamabbas.helmetguard.ml.Detector
 import com.misamabbas.helmetguard.ml.Letterboxer
 import com.misamabbas.helmetguard.vision.evidence.BestFrames
@@ -194,6 +196,15 @@ class FrameProcessor(
         val t1 = System.nanoTime()
         val details = runDetail(frame, result.active, timestampMs, width, height)
         val stage2Ms = (System.nanoTime() - t1) / 1e6f
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TRACE,
+                "frame $frameIndex: every %.0f ms, bikes %.0f ms + heads %.0f ms, %d bikes, tracks [%s], ended [%s]".format(
+                    frameIntervalMs, stage1Ms, stage2Ms, detections.size,
+                    result.active.joinToString { "${it.id} seen ${it.hits}" }, result.ended.joinToString { "${it.id}" },
+                ),
+            )
+        }
 
         result.active.forEach { track ->
             val record = record(track)
@@ -288,6 +299,16 @@ class FrameProcessor(
 
         val confirmedNow = record.machine.onObservation(track, record.votes, timestampMs)
         val state = record.machine.state
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TRACE,
+                "track ${track.id}: seen ${track.hits}, bike %.2f average, $state, heads [%s]; %s".format(
+                    track.averageConfidence,
+                    details.riders.joinToString { "${it.head ?: "none"} %.2f".format(it.headConfidence) },
+                    record.votes.describe(),
+                ),
+            )
+        }
 
         if (state == TrackState.SUSPECT || state == TrackState.CONFIRMED) {
             collectEvidence(record, track, details, frame, timestampMs, active, width, height)
@@ -395,6 +416,8 @@ class FrameProcessor(
     }
 
     private companion object {
+        /** Debug builds only: why a bike did or didn't become an alert. */
+        const val TRACE = "HelmetGuardTrace"
         const val METRICS_SIZE = 160
         const val DETAIL_MIN_CONFIDENCE = 0.25f
         // Same as CROP_PADDING in ml/scripts/prepare_public_dataset.py.

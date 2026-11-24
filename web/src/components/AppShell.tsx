@@ -1,9 +1,10 @@
 "use client";
 
-import { BarChart3, FileWarning, KeyRound, Layers, LayoutDashboard, LogOut, Menu, Settings, Shield, ShieldCheck, Users, Video, X } from "lucide-react";
+import { BarChart3, Download, FileWarning, KeyRound, Layers, LayoutDashboard, LogOut, Menu, Settings, Shield, ShieldCheck, Users, Video, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { APK_URL } from "@/lib/app-download";
 import { ThemeToggle } from "./ThemeToggle";
 import { cn } from "./ui";
 
@@ -78,6 +79,10 @@ export function AppShell({
               </Link>
             );
           })}
+          <a href={APK_URL} title="For Android 12 or newer" className="flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface-2">
+            <Download className="size-4" aria-hidden />
+            Android app
+          </a>
         </nav>
         <div className="flex items-center justify-between gap-2 border-t border-line p-3">
           <div className="min-w-0 px-1">

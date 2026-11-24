@@ -4,7 +4,7 @@ import { Card, inputClass, Notice, PageHeader } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
 import { daysAgo, param, type SearchParams } from "@/lib/filters";
 import { formatNumber } from "@/lib/format";
-import { purgeEvidence, saveProfile, saveSettings } from "./actions";
+import { clearAllData, purgeEvidence, saveProfile, saveSettings } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -15,6 +15,8 @@ const ERRORS: Record<string, string> = {
   save: "That could not be saved.",
   confirm: "Type PURGE exactly to remove old evidence.",
   purge: "The purge stopped part-way. Run it again to finish.",
+  confirm_all: "Type DELETE ALL exactly to delete every alert and session.",
+  clear: "Deleting stopped part-way. Run it again to finish.",
 };
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -32,6 +34,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const bytes = Number(used ?? 0);
   const error = ERRORS[param(params, "error") ?? ""];
   const purged = param(params, "purged");
+  const cleared = param(params, "cleared")?.split("-").map(Number);
 
   return (
     <>
@@ -39,6 +42,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {error && <Notice tone="bad">{error}</Notice>}
       {param(params, "saved") && <Notice>Saved.</Notice>}
       {purged && <Notice>{purged} old alerts and their files were removed.</Notice>}
+      {cleared?.length === 3 && (
+        <Notice>
+          Deleted {formatNumber(cleared[0])} alerts, {formatNumber(cleared[1])} photos and {formatNumber(cleared[2])} detection sessions.
+        </Notice>
+      )}
 
       <div className="grid max-w-3xl gap-4">
         <Card title="Retention and offline access">
@@ -70,6 +78,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <form action={purgeEvidence} className="flex flex-wrap gap-2">
             <input name="confirm" placeholder="Type PURGE" aria-label="Type PURGE to confirm" autoComplete="off" className={`${inputClass} w-40`} />
             <SubmitButton variant="secondary">Remove old evidence</SubmitButton>
+          </form>
+        </Card>
+
+        <Card title="Delete all alerts and sessions">
+          <p className="mb-3 text-sm text-ink-2">
+            For a fresh start: deletes every alert with its photos and reviews, and every detection session, from every account, including confirmed violations. Accounts, phones and settings stay. Phones keep their own copies until their app data is cleared. This cannot be undone.
+          </p>
+          <form action={clearAllData} className="flex flex-wrap gap-2">
+            <input name="confirm" placeholder="Type DELETE ALL" aria-label="Type DELETE ALL to confirm" autoComplete="off" className={`${inputClass} w-44`} />
+            <SubmitButton variant="secondary">Delete everything</SubmitButton>
           </form>
         </Card>
 

@@ -2,6 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  experimental: {
+    // An alert from the video page carries its photos (the whole frame, the bike and a thumbnail),
+    // which can pass the 1 MB default on a large frame. The evidence bucket takes 5 MB a photo.
+    serverActions: { bodySizeLimit: "4mb" },
+  },
   async headers() {
     return [
       {

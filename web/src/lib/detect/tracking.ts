@@ -18,6 +18,29 @@ export type Rules = {
 // Same thresholds as the Android app, except 4 bare-head frames instead of 5: the web samples fewer frames per second.
 export const DEFAULT_RULES: Rules = { minConfidence: 0.55, minBareFrames: 4, minBareShare: 0.7, minBareSpanMs: 500 };
 
+/** Frames a bike may go unseen before it counts as gone. */
+export const MAX_MISSED_FRAMES = 3;
+
+/** Corners of a box as shares of the whole frame (0..1), as the Android app stores them. */
+export type Corners = [number, number, number, number];
+
+/** A JPEG as a data URL, with its size. */
+export type Photo = { dataUrl: string; width: number; height: number };
+
+/**
+ * The evidence the Android app keeps for an alert, from the frame where a bare head was clearest:
+ * the whole frame, the bike with its riders, a 320x240 thumbnail for lists, and the heads seen.
+ * Number plates are not detected.
+ */
+export type Capture = {
+  timeMs: number;
+  frame: Photo;
+  bike: Photo;
+  thumb: Photo;
+  bikeBox: Corners;
+  heads: { bare: boolean; score: number; box: Corners }[];
+};
+
 export class Track {
   hits = 1;
   missed = 0;
@@ -31,6 +54,8 @@ export class Track {
   /** Picture of the whole bike from the clearest bare-head frame, as a JPEG data URL. */
   snapshot: string | null = null;
   snapshotScore = 0;
+  /** Everything saved with the alert, from that same frame. */
+  capture: Capture | null = null;
 
   constructor(
     readonly id: number,
@@ -83,7 +108,7 @@ export class Tracker {
 
   constructor(
     private readonly minIou = 0.3,
-    private readonly maxMissed = 3,
+    private readonly maxMissed = MAX_MISSED_FRAMES,
   ) {}
 
   update(detections: { box: Box; score: number }[], timeMs: number): Track[] {

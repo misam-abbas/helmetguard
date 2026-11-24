@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.SystemClock
+import com.misamabbas.helmetguard.BuildConfig
 import android.provider.Settings
 import android.util.Log
 import android.util.Size
@@ -256,7 +257,15 @@ class LiveViewModel @Inject constructor(
                 lastFrameMs = now
 
                 val frame = converter.convert(image)
-                val timestampMs = image.imageInfo.timestamp / 1_000_000
+                // The time rules (a bare head seen over at least 0.5 s, an alert saved 3 s after it is
+                // confirmed) need real time between processed frames. On a Pixel 7a the camera's
+                // timestamps advanced only 33 ms per processed frame while each took about 370 ms,
+                // which stretched every rule about 11 times and kept alerts open long enough to fill
+                // the evidence memory, so later alerts had no photos.
+                val timestampMs = SystemClock.elapsedRealtime()
+                if (BuildConfig.DEBUG) {
+                    Log.d(TRACE, "frame clocks: camera ${image.imageInfo.timestamp / 1_000_000} ms, phone $timestampMs ms")
+                }
                 lastFrameTs = timestampMs
                 val output = current.process(frame, timestampMs)
                 frameCount++
@@ -277,6 +286,7 @@ class LiveViewModel @Inject constructor(
 
     private companion object {
         const val TAG = "HelmetGuard"
+        const val TRACE = "HelmetGuardTrace"
         const val CONDITIONS_EVERY_MS = 2000L
         const val FLUSH_MS = 2000L
     }

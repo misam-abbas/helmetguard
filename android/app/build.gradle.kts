@@ -25,8 +25,8 @@ android {
         applicationId = "com.misamabbas.helmetguard"
         minSdk = 31
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         buildConfigField("String", "SUPABASE_URL", "\"${secret("SUPABASE_URL")}\"")
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"${secret("SUPABASE_PUBLISHABLE_KEY")}\"")
@@ -47,9 +47,16 @@ android {
             }
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Not shrunk yet: the shrunk build has never run on a phone, and an update that crashes
+            // can't be rolled back without uninstalling, which loses alerts not yet synced. This runs
+            // the same code as the debug builds in use. Turn shrinking on after testing it on a device.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // The APK the website offers. Signed with the debug key for now: quick, but that key
+            // is public, so anyone could sign a fake update. Use a private release key before
+            // handing the app beyond testers.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

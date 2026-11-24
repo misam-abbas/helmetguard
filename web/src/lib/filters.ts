@@ -82,3 +82,35 @@ export function rangeFromDays(days: number) {
   const from = new Date(to.getTime() - days * 86_400_000);
   return { from: from.toISOString(), to: to.toISOString() };
 }
+
+// The dashboard's periods, the same as on the Android app's home screen, so both show the same totals.
+export const PERIODS = [
+  { value: "today", label: "Today" },
+  { value: "7", label: "7 days" },
+  { value: "30", label: "30 days" },
+] as const;
+
+export type Period = (typeof PERIODS)[number]["value"];
+
+export function parsePeriod(params: SearchParams): Period {
+  const value = param(params, "period");
+  return PERIODS.find((p) => p.value === value)?.value ?? "today";
+}
+
+const PAKISTAN_OFFSET_MS = 5 * 3_600_000; // UTC+5 all year: Pakistan has no daylight saving time
+
+/** Midnight at the start of today in Pakistan time. */
+export function startOfTodayPakistan(now = new Date()): Date {
+  const local = new Date(now.getTime() + PAKISTAN_OFFSET_MS);
+  return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) - PAKISTAN_OFFSET_MS);
+}
+
+/**
+ * Today since midnight Pakistan time, or the last 7 or 30 days, exactly as the app counts them.
+ * Like the app, nothing after "now" is cut off: the end is a day ahead, so a record from a phone
+ * whose clock runs a little fast still counts.
+ */
+export function rangeForPeriod(period: Period, now = new Date()) {
+  const from = period === "today" ? startOfTodayPakistan(now) : new Date(now.getTime() - Number(period) * 86_400_000);
+  return { from: from.toISOString(), to: new Date(now.getTime() + 86_400_000).toISOString() };
+}

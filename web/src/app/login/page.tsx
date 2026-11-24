@@ -1,9 +1,10 @@
-import { Shield } from "lucide-react";
+import { Download, Shield } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PasswordInput } from "@/components/PasswordInput";
 import { SubmitButton } from "@/components/SubmitButton";
-import { inputClass, Notice } from "@/components/ui";
+import { inputClass, Notice, secondaryButtonClass } from "@/components/ui";
+import { APK_NOTE, APK_URL } from "@/lib/app-download";
 import { param, type SearchParams } from "@/lib/filters";
 import { AUTH_MESSAGES } from "@/lib/supabase/email";
 import { signIn, signUp } from "./actions";
@@ -79,6 +80,15 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             {signup ? "Sign in" : "Create an account"}
           </Link>
         </p>
+        <section aria-labelledby="get-app" className="mt-6 rounded-md border border-line p-3">
+          <h2 id="get-app" className="text-sm font-medium">
+            Detect on a phone
+          </h2>
+          <p className="mb-2 mt-0.5 text-xs text-ink-2">{APK_NOTE}</p>
+          <a href={APK_URL} className={`${secondaryButtonClass} w-full`}>
+            <Download className="size-4" aria-hidden /> Download the Android app
+          </a>
+        </section>
         <p className="mt-6 text-xs text-ink-3">
           <Link href="/privacy" className="underline underline-offset-2">
             Privacy notice

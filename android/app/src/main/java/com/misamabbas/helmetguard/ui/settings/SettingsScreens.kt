@@ -41,8 +41,10 @@ import com.misamabbas.helmetguard.data.AppSettings
 import com.misamabbas.helmetguard.data.SettingsRepository
 import com.misamabbas.helmetguard.data.db.AppDatabase
 import com.misamabbas.helmetguard.ml.Letterboxer
+import com.misamabbas.helmetguard.ml.ModelEntry
 import com.misamabbas.helmetguard.ml.ModelStatus
 import com.misamabbas.helmetguard.ml.ModelStore
+import com.misamabbas.helmetguard.ml.RuntimeOptions
 import com.misamabbas.helmetguard.sync.SyncScheduler
 import com.misamabbas.helmetguard.ui.auth.AuthViewModel
 import com.misamabbas.helmetguard.ui.components.SyncBadge
@@ -186,12 +188,13 @@ private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     }
 }
 
-data class BenchmarkResult(val stage1Ms: Float, val stage2Ms: Float?)
+/** One model under one runtime setup: time per call, and how much of it ONNX Runtime took. */
+data class BenchmarkRow(val stage: String, val runtime: String, val totalMs: Float, val modelMs: Float)
 
 @HiltViewModel
 class DiagnosticsViewModel @Inject constructor(private val models: ModelStore) : ViewModel() {
     val status = models.status()
-    private val _result = MutableStateFlow<BenchmarkResult?>(null)
+    private val _result = MutableStateFlow<List<BenchmarkRow>?>(null)
     val result = _result.asStateFlow()
     val running = MutableStateFlow(false)
     val error = MutableStateFlow<String?>(null)
@@ -202,30 +205,35 @@ class DiagnosticsViewModel @Inject constructor(private val models: ModelStore) :
             running.value = true
             runCatching {
                 withContext(Dispatchers.Default) {
-                    val stage1 = timed(manifest.stage1.input) { models.create(manifest.stage1) }
-                    val stage2 = manifest.stage2?.let { entry -> timed(entry.input) { models.create(entry) } }
-                    BenchmarkResult(stage1, stage2)
+                    val stages = listOfNotNull("Stage 1" to manifest.stage1, manifest.stage2?.let { "Stage 2" to it })
+                    stages.flatMap { (name, entry) -> RUNTIMES.map { runtime -> timed(name, entry, runtime) } }
                 }
             }.onSuccess { _result.value = it }.onFailure { error.value = it.message }
             running.value = false
         }
     }
 
-    private inline fun timed(size: Int, create: () -> com.misamabbas.helmetguard.ml.Detector): Float {
-        val frame = Bitmap.createBitmap(size * 2, size * 2, Bitmap.Config.ARGB_8888)
-        val box = Letterboxer(size)
+    private fun timed(stage: String, entry: ModelEntry, runtime: RuntimeOptions): BenchmarkRow {
+        val frame = Bitmap.createBitmap(entry.input * 2, entry.input * 2, Bitmap.Config.ARGB_8888)
+        val box = Letterboxer(entry.input)
         box.draw(frame)
-        return create().use { detector ->
+        return models.create(entry, runtime).use { detector ->
             repeat(WARM_UP) { detector.detect(box.bitmap, 0.5f) }
+            var modelMs = 0f
             val start = System.nanoTime()
-            repeat(RUNS) { detector.detect(box.bitmap, 0.5f) }
-            (System.nanoTime() - start) / 1e6f / RUNS
+            repeat(RUNS) {
+                detector.detect(box.bitmap, 0.5f)
+                modelMs += detector.lastRunMs
+            }
+            BenchmarkRow(stage, runtime.label, (System.nanoTime() - start) / 1e6f / RUNS, modelMs / RUNS)
         }
     }
 
     private companion object {
         const val WARM_UP = 5
-        const val RUNS = 30
+        const val RUNS = 20
+        /** The app's setup, and XNNPACK for comparison: some phones may run it faster. */
+        val RUNTIMES = listOf(RuntimeOptions.DEFAULT, RuntimeOptions(cpuThreads = 1, xnnpackThreads = 4))
     }
 }
 
@@ -248,9 +256,8 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
             style = MaterialTheme.typography.bodyMedium,
         )
         Button(viewModel::benchmark, Modifier.fillMaxWidth(), enabled = status is ModelStatus.Ready && !running) { Text(if (running) "Measuring…" else "Run model benchmark") }
-        result?.let {
-            Text("Stage 1: %.1f ms per frame".format(it.stage1Ms))
-            it.stage2Ms?.let { ms -> Text("Stage 2: %.1f ms per crop".format(ms)) }
+        result?.forEach { row ->
+            Text("${row.stage}, ${row.runtime}: %.1f ms (model %.1f ms)".format(row.totalMs, row.modelMs))
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         HorizontalDivider()

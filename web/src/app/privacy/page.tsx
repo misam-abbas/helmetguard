@@ -11,6 +11,7 @@ const SECTIONS = [
     items: [
       "Photos of motorcycles flagged by the AI: the road scene, a picture of the whole motorcycle, the riders and their bare heads.",
       "Session totals, a typed location label, the time, and which device and operator captured the record.",
+      "A video analysed on the website stays on the computer that analyses it. Only the alerts with their photos, and the video's file name and totals, are saved.",
     ],
   },
   {

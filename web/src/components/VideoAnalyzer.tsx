@@ -1,9 +1,13 @@
 "use client";
 
 import { Download, Play, Square, Upload } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { crop, detect, loadModels, scratch, threadCount } from "@/lib/detect/analyzer";
-import { DEFAULT_RULES, Tracker, type Head, type Track } from "@/lib/detect/tracking";
+import { finishVideoSession, saveVideoViolation, startVideoSession } from "@/app/(dash)/detect/actions";
+import { detect, loadModels, photo, scratch, threadCount, thumbnail } from "@/lib/detect/analyzer";
+import { browserKey, browserName, corners, sessionTotals, violationForm } from "@/lib/detect/save";
+import type { VideoSessionEnd } from "@/lib/detect/save-types";
+import { DEFAULT_RULES, MAX_MISSED_FRAMES, Tracker, type Head, type Track } from "@/lib/detect/tracking";
 import { clampBox, grow, height, width, type Box } from "@/lib/detect/yolo";
 import { buttonClass, Card, cn, EmptyState, inputClass, Notice, secondaryButtonClass } from "./ui";
 
@@ -31,6 +35,11 @@ type Result = {
 };
 
 type Progress = { positionMs: number; durationMs: number; frames: number; msPerFrame: number; motorcycles: number };
+
+/** Saving the alerts to Violations, so they reach the dashboard and analytics like the app's. */
+type Saving = { on: boolean; saved: number; failed: number; problem: string | null };
+
+const NOT_SAVING: Saving = { on: false, saved: 0, failed: 0, problem: null };
 
 function clock(ms: number) {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -101,6 +110,7 @@ export function VideoAnalyzer() {
   const [progress, setProgress] = useState<Progress>({ positionMs: 0, durationMs: 0, frames: 0, msPerFrame: 0, motorcycles: 0 });
   const [results, setResults] = useState<Result[]>([]);
   const [engine, setEngine] = useState<string | null>(null);
+  const [saving, setSaving] = useState<Saving>(NOT_SAVING);
   const view = useRef<HTMLCanvasElement>(null);
   const stopRequested = useRef(false);
   const running = status === "loading" || status === "running";
@@ -112,8 +122,69 @@ export function VideoAnalyzer() {
     stopRequested.current = false;
     setError(null);
     setResults([]);
+    setSaving(NOT_SAVING);
     setStatus("loading");
     const url = URL.createObjectURL(file);
+
+    // Saving: one detection session for this video, and one alert per flagged bike, sent one at a
+    // time beside the analysis. A failed save never stops the analysis.
+    const sessionId = crypto.randomUUID();
+    const key = browserKey();
+    let saveOn = false;
+    let finished = false;
+    let saved = 0;
+    let failed = 0;
+    let problem: string | null = null;
+    const savedTracks = new Set<number>();
+    let queue: Promise<void> = Promise.resolve();
+    let modelVersion = "";
+    let tracker: Tracker | null = null;
+    let frames = 0;
+    let spent = 0;
+
+    const save = (track: Track) => {
+      if (!saveOn || savedTracks.has(track.id) || !track.capture) return;
+      savedTracks.add(track.id);
+      const form = violationForm(track, { sessionId, violationId: crypto.randomUUID(), browserKey: key }, modelVersion);
+      track.capture = null; // the photos now live in the form
+      if (!form) return;
+      queue = queue.then(async () => {
+        try {
+          const result = await saveVideoViolation(form);
+          if (result.ok) saved += 1;
+          else {
+            failed += 1;
+            problem = result.error;
+          }
+        } catch {
+          failed += 1;
+          problem = "The server could not be reached.";
+        }
+        setSaving({ on: true, saved, failed, problem });
+      });
+    };
+
+    const finish = async (sessionStatus: VideoSessionEnd["status"]) => {
+      if (!saveOn || finished || !tracker) return;
+      finished = true;
+      tracker.tracks.filter((t) => t.flagged()).forEach(save);
+      await queue;
+      try {
+        const result = await finishVideoSession({
+          sessionId,
+          status: sessionStatus,
+          framesProcessed: frames,
+          avgFps: spent > 0 ? (frames * 1000) / spent : 0,
+          violationsSaved: saved,
+          ...sessionTotals(tracker),
+        });
+        if (!result.ok) problem = result.error;
+      } catch {
+        problem = "The server could not be reached.";
+      }
+      setSaving({ on: true, saved, failed, problem });
+    };
+
     try {
       const models = await loadModels();
       const threads = threadCount();
@@ -137,12 +208,27 @@ export function VideoAnalyzer() {
       const whole: Box = { x1: 0, y1: 0, x2: frame.width, y2: frame.height };
       const pad1 = scratch(models.stage1.size);
       const pad2 = scratch(models.stage2.size);
-      const tracker = new Tracker();
+      tracker = new Tracker();
       const durationMs = Math.floor(video.duration * 1000);
+      modelVersion = models.version;
+
+      try {
+        const started = await startVideoSession({
+          sessionId,
+          browserKey: key,
+          browser: browserName(),
+          fileName: file.name,
+          durationMs,
+          modelVersion,
+          sampleRate: rate,
+        });
+        saveOn = started.ok;
+        setSaving(started.ok ? { on: true, saved: 0, failed: 0, problem: null } : { ...NOT_SAVING, problem: started.error });
+      } catch {
+        setSaving({ ...NOT_SAVING, problem: "The server could not be reached." });
+      }
 
       setStatus("running");
-      let frames = 0;
-      let spent = 0;
       for (let t = 0; t * 1000 < durationMs && !stopRequested.current; t += 1 / rate) {
         video.currentTime = t;
         await once(video, "seeked");
@@ -165,16 +251,31 @@ export function VideoAnalyzer() {
             .map((p) => ({ box: p.box, bare: kinds[p.cls] === "no_helmet", score: p.score }));
           track.observe(heads, timeMs);
 
-          // The evidence is a picture of the whole bike and its riders, taken from the
-          // frame where the bare head was clearest. Number plates are not detected.
+          // The evidence is the whole frame, the whole bike with its riders and a thumbnail, all
+          // from the frame where the bare head was clearest, as in the app. Number plates are not detected.
           const bare = heads.filter((h) => h.bare && h.score >= DEFAULT_RULES.minConfidence);
           const bareScore = bare.length ? Math.max(...bare.map((h) => h.score)) : 0;
           if (bareScore > track.snapshotScore) {
-            track.snapshot = crop(frame, clampBox(grow(track.box, 0.1), frame.width, frame.height), 480);
+            const area = clampBox(grow(track.box, 0.1), frame.width, frame.height);
+            const bike = photo(frame, area, 480);
+            track.snapshot = bike.dataUrl;
             track.snapshotScore = bareScore;
+            track.capture = {
+              timeMs,
+              frame: photo(frame, whole, MAX_FRAME_WIDTH, 0.8),
+              bike,
+              thumb: thumbnail(frame, area),
+              bikeBox: corners(track.box, frame.width, frame.height),
+              heads: heads
+                .filter((h) => h.score >= DEFAULT_RULES.minConfidence)
+                .map((h) => ({ bare: h.bare, score: h.score, box: corners(h.box, frame.width, frame.height) })),
+            };
           }
           drawn.push({ track, heads });
         }
+
+        // A flagged bike that has left the picture gets no better photo: save its alert now.
+        tracker.tracks.filter((tr) => tr.missed > MAX_MISSED_FRAMES && tr.flagged()).forEach(save);
 
         frames += 1;
         spent += performance.now() - started;
@@ -182,10 +283,13 @@ export function VideoAnalyzer() {
         setProgress({ positionMs: timeMs, durationMs, frames, msPerFrame: spent / frames, motorcycles: tracker.counted().length });
         setResults(tracker.tracks.filter((tr) => tr.flagged()).map(toResult));
       }
-      setStatus(stopRequested.current ? "stopped" : "done");
+      const stopped = stopRequested.current;
+      setStatus(stopped ? "stopped" : "done");
+      await finish(stopped ? "cancelled" : "completed");
     } catch (e) {
       setError(e instanceof Error ? e.message : "The analysis failed.");
       setStatus("error");
+      await finish("interrupted");
     } finally {
       URL.revokeObjectURL(url);
     }
@@ -247,12 +351,25 @@ export function VideoAnalyzer() {
           )}
         </div>
         <p className="mt-3 text-xs text-ink-3">
-          The video stays on this computer. The detection runs in your browser and nothing is uploaded. Every result is an unverified AI alert until a person checks it.
+          The video stays on this computer: the detection runs in your browser. Each rider found without a helmet is saved to Violations, with photos of the bike, as an unverified AI alert for a person to check, and the
+          video&apos;s totals count in the dashboard and analytics, as for the Android app.
         </p>
       </Card>
 
       {error && <Notice tone="bad">{error}</Notice>}
       {status === "loading" && <Notice tone="warn">Loading the detection models. The first time takes a little longer.</Notice>}
+      {!saving.on && saving.problem && status !== "idle" && (
+        <Notice tone="bad">This analysis is not being saved to Violations: {saving.problem}</Notice>
+      )}
+      {saving.on && (saving.saved > 0 || saving.failed > 0) && (
+        <Notice tone={saving.failed > 0 ? "bad" : undefined}>
+          {saving.saved} {saving.saved === 1 ? "alert" : "alerts"} saved to{" "}
+          <Link href="/violations?source=video" className="underline underline-offset-2">
+            Violations
+          </Link>
+          {saving.failed > 0 && `; ${saving.failed} could not be saved${saving.problem ? `: ${saving.problem}` : ""}`}.
+        </Notice>
+      )}
 
       {(running || status === "done" || status === "stopped") && (
         <Card title={status === "done" ? "Finished" : status === "stopped" ? "Stopped" : "Analysing"}>

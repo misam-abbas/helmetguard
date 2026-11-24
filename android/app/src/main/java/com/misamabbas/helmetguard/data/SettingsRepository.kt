@@ -24,9 +24,15 @@ enum class SourceFilter { LIVE, VIDEO, ALL;
     val dbValue: String? get() = when (this) { LIVE -> "live"; VIDEO -> "video"; ALL -> null }
 }
 
+/**
+ * "Minimum head confidence" for a new install: the same cut-off the website uses with the same
+ * models (yolo11n-v3), so the app and the website flag the same riders.
+ */
+const val DEFAULT_HEAD_CONFIDENCE = 0.55f
+
 data class AppSettings(
     val minNoHelmetObservations: Int = 5,
-    val minNoHelmetConfidence: Float = 0.55f,
+    val minNoHelmetConfidence: Float = DEFAULT_HEAD_CONFIDENCE,
     val minNoHelmetShare: Float = 0.70f,
     val stage1Confidence: Float = 0.35f,
     val riderPolicy: RiderPolicy = RiderPolicy.ALL_RIDERS,
@@ -65,7 +71,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
 
     private fun read(p: Preferences) = AppSettings(
         minNoHelmetObservations = p[K.observations] ?: 5,
-        minNoHelmetConfidence = p[K.confidence] ?: 0.55f,
+        minNoHelmetConfidence = p[K.confidence] ?: DEFAULT_HEAD_CONFIDENCE,
         minNoHelmetShare = p[K.share] ?: 0.70f,
         stage1Confidence = p[K.stage1] ?: 0.35f,
         riderPolicy = runCatching { RiderPolicy.valueOf(p[K.policy] ?: "") }.getOrDefault(RiderPolicy.ALL_RIDERS),

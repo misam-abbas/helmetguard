@@ -70,3 +70,34 @@ export async function purgeEvidence(form: FormData) {
   revalidatePath("/settings");
   redirect(`/settings?purged=${removed}`);
 }
+
+// A fresh start: every alert with its photos and reviews, and every detection session, for all
+// accounts. Accounts, phones and settings stay. Photos go through the Storage API with the admin's
+// own session, so the files themselves are deleted, not just their records.
+export async function clearAllData(form: FormData) {
+  const { supabase } = await requireAdmin();
+  if (String(form.get("confirm")) !== "DELETE ALL") redirect("/settings?error=confirm_all");
+
+  let files = 0;
+  for (;;) {
+    const { data: rows, error: readError } = await supabase.from("violation_evidence").select("id, storage_path").limit(PURGE_BATCH);
+    if (readError) redirect("/settings?error=clear");
+    if (!rows || rows.length === 0) break;
+    const { error: storageError } = await supabase.storage.from("evidence").remove(rows.map((r) => r.storage_path as string));
+    if (storageError) redirect("/settings?error=clear");
+    const { error } = await supabase.from("violation_evidence").delete().in("id", rows.map((r) => r.id as string));
+    if (error) redirect("/settings?error=clear");
+    files += rows.length;
+  }
+
+  // Reviews go with their alerts, and alerts with their sessions.
+  const { count: alerts } = await supabase.from("violations").select("id", { count: "exact", head: true });
+  const { error: alertsError } = await supabase.from("violations").delete().not("id", "is", null);
+  if (alertsError) redirect("/settings?error=clear");
+  const { count: sessions } = await supabase.from("detection_sessions").select("id", { count: "exact", head: true });
+  const { error: sessionsError } = await supabase.from("detection_sessions").delete().not("id", "is", null);
+  if (sessionsError) redirect("/settings?error=clear");
+
+  revalidatePath("/", "layout");
+  redirect(`/settings?cleared=${alerts ?? 0}-${files}-${sessions ?? 0}`);
+}

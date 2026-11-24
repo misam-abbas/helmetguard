@@ -1,6 +1,7 @@
 // Browser-only: runs the same two ONNX models as the Android app, on the user's own computer.
-// The video never leaves the browser.
+// The video never leaves the browser; only alerts and their photos are saved (lib/detect/save.ts).
 import type { InferenceSession, Tensor } from "onnxruntime-web";
+import type { Photo } from "./tracking";
 import { letterboxMapping, parseOutput, toSource, type Box, type Detection } from "./yolo";
 
 type Ort = typeof import("onnxruntime-web/wasm");
@@ -91,14 +92,36 @@ export async function detect(models: Models, stage: Stage, pad: Scratch, frame: 
   return found.map((d) => ({ ...d, box: toSource(d.box, mapping) }));
 }
 
-/** A small JPEG of one area of the frame, for the results list. */
-export function crop(frame: HTMLCanvasElement, region: Box, maxSide = 360): string {
+/** A JPEG of one area of the frame, at most `maxSide` pixels on its long side. */
+export function photo(frame: HTMLCanvasElement, region: Box, maxSide = 360, quality = 0.85): Photo {
   const w = Math.max(1, region.x2 - region.x1);
   const h = Math.max(1, region.y2 - region.y1);
   const scale = Math.min(1, maxSide / Math.max(w, h));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(w * scale);
-  canvas.height = Math.round(h * scale);
+  canvas.width = Math.max(1, Math.round(w * scale));
+  canvas.height = Math.max(1, Math.round(h * scale));
   canvas.getContext("2d")?.drawImage(frame, region.x1, region.y1, w, h, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.85);
+  return { dataUrl: canvas.toDataURL("image/jpeg", quality), width: canvas.width, height: canvas.height };
+}
+
+/** A small JPEG of one area of the frame, for the results list. */
+export function crop(frame: HTMLCanvasElement, region: Box, maxSide = 360): string {
+  return photo(frame, region, maxSide).dataUrl;
+}
+
+/** One area of the frame fitted into a fixed size with dark bars, like the app's list thumbnails. */
+export function thumbnail(frame: HTMLCanvasElement, region: Box, width = 320, height = 240, quality = 0.7): Photo {
+  const w = Math.max(1, region.x2 - region.x1);
+  const h = Math.max(1, region.y2 - region.y1);
+  const scale = Math.min(width / w, height / h);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(frame, region.x1, region.y1, w, h, (width - w * scale) / 2, (height - h * scale) / 2, w * scale, h * scale);
+  }
+  return { dataUrl: canvas.toDataURL("image/jpeg", quality), width, height };
 }

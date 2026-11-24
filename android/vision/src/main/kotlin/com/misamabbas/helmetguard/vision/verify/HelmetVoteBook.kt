@@ -168,6 +168,12 @@ class HelmetVoteBook(private val settings: VerifierSettings = VerifierSettings()
         }
     }
 
+    /** Each rider's counted sightings against the rules, for the debug log. */
+    fun describe(): String = riders.joinToString(" ") { rider ->
+        val span = if (rider.noHelmetCount > 0) rider.lastNoHelmetMs - rider.firstNoHelmetMs else 0L
+        "rider ${rider.index}: bare ${rider.noHelmetCount}/$minNoHelmet, helmet ${rider.helmetCount}, bare span ${span} ms, seen ${rider.seen}"
+    }.ifEmpty { "no riders yet" }
+
     private fun distance(a: Box, b: Box) = hypot(a.centerX - b.centerX, a.centerY - b.centerY)
 
     private companion object {

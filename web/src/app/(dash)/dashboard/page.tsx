@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { TrendChart } from "@/components/charts";
+import { PeriodSwitch } from "@/components/PeriodSwitch";
 import { SourceSwitch } from "@/components/SourceSwitch";
 import { Card, EmptyState, Notice, PageHeader, TextLink } from "@/components/ui";
 import { VIOLATION_ROW_COLUMNS, ViolationRows, type ViolationRow } from "@/components/ViolationRows";
 import { requireStaff } from "@/lib/auth";
 import { thumbnailsFor } from "@/lib/evidence";
-import { buildHref, param, parseSource, rangeFromDays, type SearchParams } from "@/lib/filters";
+import { buildHref, param, parsePeriod, parseSource, PERIODS, rangeForPeriod, type SearchParams } from "@/lib/filters";
 import { formatBucket, formatNumber, formatPercent } from "@/lib/format";
 import type { DashboardSummary, TrendPoint } from "@/lib/types";
 
@@ -27,15 +28,20 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const { supabase } = await requireStaff();
   const params = await searchParams;
   const source = parseSource(params);
-  const { from, to } = rangeFromDays(30);
+  // The same periods and totals as the Android app's home screen. The chart shows at least a week.
+  const period = parsePeriod(params);
+  const { from, to } = rangeForPeriod(period);
   const range = { p_from: from, p_to: to, p_source: source };
+  const chartPeriod = period === "today" ? "7" : period;
+  const chartRange = { ...rangeForPeriod(chartPeriod), p_source: source };
+  const periodLabel = PERIODS.find((p) => p.value === period)?.label ?? "Today";
 
   let recent = supabase.from("violations").select(VIOLATION_ROW_COLUMNS).order("detected_at", { ascending: false }).limit(10);
   if (source) recent = recent.eq("source", source);
 
   const [summaryResult, trendResult, recentResult, storageResult] = await Promise.all([
     supabase.rpc("dashboard_summary", range),
-    supabase.rpc("violation_trend", { ...range, p_interval: "day" }),
+    supabase.rpc("violation_trend", { p_from: chartRange.from, p_to: chartRange.to, p_source: source, p_interval: "day" }),
     recent,
     supabase.rpc("evidence_bytes_used"),
   ]);
@@ -52,8 +58,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   return (
     <>
-      <PageHeader title="Dashboard" subtitle="Last 30 days, Pakistan time">
-        <SourceSwitch path="/dashboard" params={params} current={source} />
+      <PageHeader title="Dashboard" subtitle={period === "today" ? "Today since midnight, Pakistan time" : `Last ${periodLabel}, Pakistan time`}>
+        <div className="flex flex-wrap gap-2">
+          <PeriodSwitch path="/dashboard" params={params} current={period} />
+          <SourceSwitch path="/dashboard" params={params} current={source} />
+        </div>
       </PageHeader>
 
       {param(params, "notice") === "password" && <Notice>Your password was changed. Use the new one next time you sign in.</Notice>}
@@ -75,9 +84,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <Stat label="Reviewed violations" value={formatNumber(summary?.reviewed_confirmed)} hint={`${formatNumber(summary?.reviewed_rejected)} rejected`} />
       </div>
 
-      <Card title="AI alerts per day" className="mt-4">
+      <Card title={`AI alerts per day, last ${chartPeriod} days`} className="mt-4">
         {trend.length === 0 ? (
-          <EmptyState title="No alerts in this period">Alerts appear here after the Android app syncs them.</EmptyState>
+          <EmptyState title="No alerts in this period">Alerts appear here after the Android app syncs them, or after a video is analysed on this website.</EmptyState>
         ) : (
           <TrendChart data={trend.map((t) => ({ label: formatBucket(t.bucket), live: Number(t.live), video: Number(t.video) }))} showLive={source !== "video"} showVideo={source !== "live"} />
         )}
