@@ -65,6 +65,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
         val lock = booleanPreferencesKey("evidence_lock")
         val source = stringPreferencesKey("source_filter")
         val deviceId = stringPreferencesKey("device_id")
+        val retriedFor = intPreferencesKey("retried_refused_for_version")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map(::read)
@@ -106,6 +107,16 @@ class SettingsRepository @Inject constructor(@ApplicationContext private val con
 
     suspend fun setSourceFilter(value: SourceFilter) {
         context.dataStore.edit { it[K.source] = value.name }
+    }
+
+    /**
+     * True the first time it is asked for a new app version, then false: alerts the server refused
+     * get one more try after each update, which may have fixed what was refused.
+     */
+    suspend fun firstStartOf(versionCode: Int): Boolean {
+        if (context.dataStore.data.first()[K.retriedFor] == versionCode) return false
+        context.dataStore.edit { it[K.retriedFor] = versionCode }
+        return true
     }
 
     /** Created once on first launch and never changed, so the server sees one device. */

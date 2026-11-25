@@ -155,10 +155,21 @@ class SyncWorker @AssistedInject constructor(
             for (file in files) {
                 if (file.uploaded) continue
                 val bytes = store.file(file.relativePath).takeIf { it.exists() }?.readBytes() ?: continue
-                check(bytes.size <= MAX_FILE_BYTES) { "A photo is larger than the 5 MB limit" }
-                // Always the same path, so a retry overwrites instead of duplicating.
-                supabase.storage.from(BUCKET).upload(pathOf(userId, id, file.kind, file.seq), bytes) { upsert = true }
-                db.violations().markUploaded(file.id)
+                val name = "${file.kind}_${file.seq}"
+                if (bytes.size > MAX_FILE_BYTES) {
+                    log(id, "Photo $name left out: larger than the 5 MB limit")
+                    continue
+                }
+                // A photo the server refuses is left out and the alert goes on without it: one bad
+                // picture (a 400 from storage on a head crop, on 2026-11-25) used to hold back the
+                // whole alert for good. Network problems still stop here and are tried again later.
+                try {
+                    // Always the same path, so a retry overwrites instead of duplicating.
+                    supabase.storage.from(BUCKET).upload(pathOf(userId, id, file.kind, file.seq), bytes) { upsert = true }
+                    db.violations().markUploaded(file.id)
+                } catch (e: RestException) {
+                    log(id, "Photo $name left out, refused by the server: ${e.message}")
+                }
             }
             db.violations().setSyncState(id, SyncState.FILES_DONE)
 

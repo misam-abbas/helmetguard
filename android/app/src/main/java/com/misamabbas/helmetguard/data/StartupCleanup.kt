@@ -1,5 +1,6 @@
 package com.misamabbas.helmetguard.data
 
+import com.misamabbas.helmetguard.BuildConfig
 import com.misamabbas.helmetguard.data.db.AppDatabase
 import com.misamabbas.helmetguard.data.db.SyncState
 import com.misamabbas.helmetguard.video.VideoAnalysisManager
@@ -27,6 +28,10 @@ class StartupCleanup @Inject constructor(
         db.violations().staleProvisional(cutoff).forEach { id ->
             db.violations().setSyncState(id, SyncState.QUEUED, "App closed before photos were saved")
         }
+
+        // Alerts the server refused before an update get one more try with the new version: since
+        // 0.3.1 a refused photo is left out instead of holding back its whole alert.
+        if (settings.firstStartOf(BuildConfig.VERSION_CODE)) db.violations().retryFailed()
 
         val removeBefore = System.currentTimeMillis() - settings.current().localCleanupDays * DAY_MS
         db.violations().removableEvidence(removeBefore).forEach { file ->
